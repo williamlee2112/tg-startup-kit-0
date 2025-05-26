@@ -1,7 +1,7 @@
 {
   "name": "create-volo-app",
-  "version": "1.0.3",
-  "description": "CLI tool to create a new Volo app with Firebase Auth, Neon DB, and Cloudflare deployment",
+  "version": "1.0.5",
+  "description": "CLI tool to create a new Volo app with Firebase Auth, Postgres, and Cloudflare deployment",
   "type": "module",
   "bin": {
     "create-volo-app": "./bin/cli.js"
@@ -29,7 +29,7 @@
     "cli",
     "create-app"
   ],
-  "author": "Volo Team",
+  "author": "VoloBuilds",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"

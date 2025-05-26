@@ -1,9 +1,9 @@
 import inquirer from 'inquirer';
-import { execa } from 'execa';
 import chalk from 'chalk';
 import ora from 'ora';
 import { logger } from '../utils/logger.js';
 import { validateFirebaseProjectId } from '../utils/validation.js';
+import { execFirebase } from '../utils/cli.js';
 
 interface FirebaseConfig {
   projectId: string;
@@ -62,7 +62,7 @@ export async function setupFirebase(): Promise<FirebaseConfig> {
 
 async function checkFirebaseAuth(): Promise<boolean> {
   try {
-    const { stdout } = await execa('firebase', ['login:list'], { stdio: 'pipe' });
+    const { stdout } = await execFirebase(['login:list']);
     return stdout.includes('@');
   } catch {
     return false;
@@ -88,7 +88,7 @@ async function loginToFirebase(): Promise<void> {
   const spinner = ora('Opening Firebase login...').start();
   
   try {
-    await execa('firebase', ['login'], { stdio: 'inherit' });
+    await execFirebase(['login'], { stdio: 'inherit' });
     spinner.succeed('Firebase login completed');
   } catch (error) {
     spinner.fail('Firebase login failed');
@@ -126,9 +126,7 @@ async function createFirebaseProject(): Promise<string> {
   const spinner = ora(`Creating Firebase project "${projectId}"...`).start();
 
   try {
-    await execa('firebase', ['projects:create', projectId, '--display-name', displayName], {
-      stdio: 'pipe'
-    });
+    await execFirebase(['projects:create', projectId, '--display-name', displayName]);
     spinner.succeed(`Firebase project "${projectId}" created successfully`);
     return projectId;
   } catch (error) {
@@ -148,7 +146,7 @@ async function selectExistingProject(): Promise<string> {
   const spinner = ora('Fetching your Firebase projects...').start();
   
   try {
-    const { stdout } = await execa('firebase', ['projects:list', '-j'], { stdio: 'pipe' });
+    const { stdout } = await execFirebase(['projects:list', '-j']);
     const response = JSON.parse(stdout);
     
     // Extract projects from the nested response
@@ -306,7 +304,7 @@ async function createWebApp(projectId: string): Promise<FirebaseConfig> {
 
 async function getExistingWebApps(projectId: string): Promise<any[]> {
   try {
-    const { stdout } = await execa('firebase', ['apps:list', 'WEB', '--project', projectId, '-j'], { stdio: 'pipe' });
+    const { stdout } = await execFirebase(['apps:list', 'WEB', '--project', projectId, '-j']);
     const response = JSON.parse(stdout);
     return response.result || [];
   } catch (error) {
@@ -320,12 +318,12 @@ async function createNewWebApp(projectId: string): Promise<string> {
   
   try {
     // Create web app (remove --json flag as it doesn't work)
-    const { stdout } = await execa('firebase', [
+    const { stdout } = await execFirebase([
       'apps:create', 
       'WEB', 
       'volo-app',
       '--project', projectId
-    ], { stdio: 'pipe' });
+    ]);
     
     // Try multiple patterns for different CLI versions
     const patterns = [
@@ -364,13 +362,13 @@ async function getWebAppConfig(projectId: string, appId: string): Promise<Fireba
   
   try {
     // Get app configuration
-    const { stdout: configOutput } = await execa('firebase', [
+    const { stdout: configOutput } = await execFirebase([
       'apps:sdkconfig', 
       'WEB', 
       appId,
       '--project', projectId,
       '--json'
-    ], { stdio: 'pipe' });
+    ]);
     
     const config = JSON.parse(configOutput);
     

@@ -3,6 +3,7 @@ import which from 'which';
 import semver from 'semver';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+import ora from 'ora';
 import { logger } from './logger.js';
 
 interface Prerequisite {
@@ -14,6 +15,8 @@ interface Prerequisite {
   description: string;
   checkVersion?: (output: string) => string | null;
   optional?: boolean;
+  canInstallLocally?: boolean;
+  npmPackage?: string;
 }
 
 const corePrerequisites: Prerequisite[] = [
@@ -56,7 +59,9 @@ const corePrerequisites: Prerequisite[] = [
     checkVersion: (output) => {
       const match = output.match(/(\d+\.\d+\.\d+)/);
       return match ? match[1] : null;
-    }
+    },
+    canInstallLocally: true,
+    npmPackage: 'firebase-tools'
   },
   {
     name: 'Wrangler CLI',
@@ -68,7 +73,9 @@ const corePrerequisites: Prerequisite[] = [
     checkVersion: (output) => {
       const match = output.match(/(\d+\.\d+\.\d+)/);
       return match ? match[1] : null;
-    }
+    },
+    canInstallLocally: true,
+    npmPackage: 'wrangler'
   }
 ];
 
@@ -92,6 +99,8 @@ const databasePrerequisites: Record<string, Prerequisite> = {
     installUrl: 'https://supabase.com/docs/guides/cli',
     description: 'Supabase CLI for managing PostgreSQL databases',
     optional: true,
+    canInstallLocally: true,
+    npmPackage: 'supabase',
     checkVersion: (output) => {
       const match = output.match(/(\d+\.\d+\.\d+)/);
       return match ? match[1] : null;
@@ -113,6 +122,54 @@ async function checkNetworkConnectivity(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function installCliTool(prereq: Prerequisite): Promise<boolean> {
+  if (!prereq.canInstallLocally || !prereq.npmPackage) {
+    return false;
+  }
+
+  const spinner = ora(`Installing ${prereq.name} locally...`).start();
+  
+  try {
+    // Install the CLI tool locally
+    await execa('npm', ['install', prereq.npmPackage], {
+      stdio: 'pipe',
+      cwd: process.cwd()
+    });
+    
+    spinner.succeed(`${prereq.name} installed locally`);
+    return true;
+  } catch (error) {
+    spinner.fail(`Failed to install ${prereq.name}`);
+    logger.debug(`Installation error: ${error}`);
+    return false;
+  }
+}
+
+async function checkLocalCliTool(prereq: Prerequisite): Promise<{ status: 'ok' | 'missing', currentVersion?: string | null }> {
+  if (!prereq.canInstallLocally || !prereq.npmPackage) {
+    return { status: 'missing' };
+  }
+
+  try {
+    // Try to run the locally installed CLI tool via npx
+    const { stdout } = await execa('npx', [prereq.command, prereq.version || '--version'], {
+      stdio: 'pipe',
+      timeout: 10000
+    });
+    
+    const currentVersion = prereq.checkVersion ? prereq.checkVersion(stdout) : stdout.trim();
+    
+    if (currentVersion && prereq.minVersion && !semver.gte(currentVersion, prereq.minVersion)) {
+      return { status: 'missing' }; // Treat outdated local version as missing
+    }
+    
+    return { status: 'ok', currentVersion };
+  } catch (error) {
+    logger.debug(`Local ${prereq.name} check failed: ${error}`);
+    return { status: 'missing' };
   }
 }
 
@@ -153,62 +210,66 @@ async function checkDatabaseChoice(): Promise<string | null> {
   return provider === 'skip' ? null : provider;
 }
 
-async function checkPrerequisite(prereq: Prerequisite): Promise<{ status: 'ok' | 'missing' | 'outdated', currentVersion?: string | null }> {
+async function checkPrerequisite(prereq: Prerequisite): Promise<{ status: 'ok' | 'missing' | 'outdated' | 'installed_locally', currentVersion?: string | null }> {
   try {
-    // Check if command exists
+    // First, check if command exists globally
     if (prereq.command === 'skip') {
-      // Skip this check (used for npx tools when running inside npx)
       return { status: 'ok', currentVersion: 'available via npx' };
-    } else if (prereq.command === 'npx') {
-      // Special handling for npx commands with timeout to prevent hanging
-      const versionArgs = prereq.version?.split(' ') || ['--version'];
-      
-      // Add timeout for npx commands to prevent hanging when running inside npx
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-      
-      try {
-        const { stdout } = await execa('npx', versionArgs, { 
-          stdio: 'pipe',
-          signal: controller.signal,
-          timeout: 10000
-        });
-        clearTimeout(timeoutId);
-        
-        const currentVersion = prereq.checkVersion ? prereq.checkVersion(stdout) : stdout.trim();
-        
-        if (currentVersion && prereq.minVersion && !semver.gte(currentVersion, prereq.minVersion)) {
-          return { status: 'outdated', currentVersion };
-        }
-        return { status: 'ok', currentVersion };
-      } catch (error) {
-        clearTimeout(timeoutId);
-        // If npx command fails (common when running inside npx), treat as missing but optional
-        logger.debug(`npx command failed: ${error}`);
-        return { status: 'missing' };
-      }
-    } else {
+    }
+
+    // Try to find global installation
+    let globalFound = false;
+    let globalVersion: string | null = null;
+    
+    try {
       const commandPath = await which(prereq.command);
-      logger.debug(`Found ${prereq.name} at: ${commandPath}`);
+      logger.debug(`Found ${prereq.name} globally at: ${commandPath}`);
+      globalFound = true;
 
       // Check version if specified
       if (prereq.version) {
         const { stdout } = await execa(prereq.command, [prereq.version]);
-        const currentVersion = prereq.checkVersion ? prereq.checkVersion(stdout) : stdout.trim();
+        globalVersion = prereq.checkVersion ? prereq.checkVersion(stdout) : stdout.trim();
 
-        if (currentVersion) {
-          logger.debug(`${prereq.name} version: ${currentVersion}`);
+        if (globalVersion) {
+          logger.debug(`Global ${prereq.name} version: ${globalVersion}`);
 
-          if (prereq.minVersion && !semver.gte(currentVersion, prereq.minVersion)) {
-            return { status: 'outdated', currentVersion };
+          if (prereq.minVersion && !semver.gte(globalVersion, prereq.minVersion)) {
+            // Global version is outdated, check if we can use/install local version
+            if (prereq.canInstallLocally) {
+              const localResult = await checkLocalCliTool(prereq);
+              if (localResult.status === 'ok') {
+                return { status: 'installed_locally', currentVersion: localResult.currentVersion };
+              }
+              // Will offer to install locally below
+            } else {
+              return { status: 'outdated', currentVersion: globalVersion };
+            }
+          } else {
+            return { status: 'ok', currentVersion: globalVersion };
           }
-          return { status: 'ok', currentVersion };
         }
+      } else {
+        return { status: 'ok' };
       }
-      return { status: 'ok' };
+    } catch (error) {
+      logger.debug(`${prereq.name} not found globally: ${error}`);
+      globalFound = false;
     }
+
+    // If global not found or outdated, check for local installation
+    if (prereq.canInstallLocally) {
+      const localResult = await checkLocalCliTool(prereq);
+      if (localResult.status === 'ok') {
+        return { status: 'installed_locally', currentVersion: localResult.currentVersion };
+      }
+    }
+
+    // Neither global nor local found
+    return { status: 'missing' };
+    
   } catch (error) {
-    logger.debug(`${prereq.name} not found: ${error}`);
+    logger.debug(`${prereq.name} check failed: ${error}`);
     return { status: 'missing' };
   }
 }
@@ -273,34 +334,86 @@ export async function checkPrerequisites(): Promise<{ databasePreference?: strin
       case 'outdated':
         outdated.push({ prereq, currentVersion: result.currentVersion! });
         break;
+      case 'installed_locally':
+        logger.success(`${prereq.name} ${result.currentVersion || ''} ✓ (installed locally)`);
+        break;
     }
   }
 
   // Handle missing prerequisites
   if (missing.length > 0) {
     logger.newLine();
-    logger.error('Missing required tools:');
-    logger.newLine();
-
-    for (const prereq of missing) {
-      console.log(chalk.red(`❌ ${prereq.name}`));
-      console.log(chalk.gray(`   ${prereq.description}`));
-      console.log(chalk.blue(`   Install: ${prereq.installUrl}`));
-      console.log('');
-    }
-
-    const { shouldContinue } = await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'shouldContinue',
-        message: 'Would you like to continue anyway? (Not recommended)',
-        default: false
+    
+    // Separate missing tools into those that can be installed locally vs those that need manual installation
+    const canInstallLocally = missing.filter(p => p.canInstallLocally);
+    const needManualInstall = missing.filter(p => !p.canInstallLocally);
+    
+    if (canInstallLocally.length > 0) {
+      logger.info('Missing CLI tools that can be installed automatically:');
+      logger.newLine();
+      
+      for (const prereq of canInstallLocally) {
+        console.log(chalk.yellow(`⚠️  ${prereq.name}`));
+        console.log(chalk.gray(`   ${prereq.description}`));
+        console.log('');
       }
-    ]);
+      
+      const { shouldInstallLocally } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'shouldInstallLocally',
+          message: 'Would you like to install these tools locally? (Recommended)',
+          default: true
+        }
+      ]);
+      
+      if (shouldInstallLocally) {
+        logger.newLine();
+        logger.info('Installing CLI tools locally...');
+        logger.newLine();
+        
+        for (const prereq of canInstallLocally) {
+          const success = await installCliTool(prereq);
+          if (!success) {
+            logger.warning(`Failed to install ${prereq.name}. You may need to install it manually.`);
+            needManualInstall.push(prereq);
+          }
+        }
+        
+        logger.newLine();
+        logger.success('Local CLI installation completed!');
+      } else {
+        needManualInstall.push(...canInstallLocally);
+      }
+    }
+    
+    if (needManualInstall.length > 0) {
+      if (canInstallLocally.length > 0) {
+        logger.newLine();
+      }
+      logger.error('Tools requiring manual installation:');
+      logger.newLine();
 
-    if (!shouldContinue) {
-      logger.info('Please install the missing tools and run create-volo-app again.');
-      process.exit(1);
+      for (const prereq of needManualInstall) {
+        console.log(chalk.red(`❌ ${prereq.name}`));
+        console.log(chalk.gray(`   ${prereq.description}`));
+        console.log(chalk.blue(`   Install: ${prereq.installUrl}`));
+        console.log('');
+      }
+
+      const { shouldContinue } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'shouldContinue',
+          message: 'Would you like to continue anyway? (Not recommended)',
+          default: false
+        }
+      ]);
+
+      if (!shouldContinue) {
+        logger.info('Please install the missing tools and run create-volo-app again.');
+        process.exit(1);
+      }
     }
   }
 

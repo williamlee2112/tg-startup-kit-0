@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import { execa } from 'execa';
 import ora from 'ora';
 import { logger } from '../utils/logger.js';
+import { execSupabase } from '../utils/cli.js';
 
 interface DatabaseConfig {
   url: string;
@@ -19,7 +20,7 @@ interface SupabaseProject {
 
 async function checkSupabaseCLI(): Promise<boolean> {
   try {
-    await execa('supabase', ['--version'], { stdio: 'pipe' });
+    await execSupabase(['--version'], { stdio: 'pipe' });
     return true;
   } catch (error) {
     return false;
@@ -29,7 +30,7 @@ async function checkSupabaseCLI(): Promise<boolean> {
 async function authenticateSupabaseCLI(): Promise<boolean> {
   try {
     // Check if already authenticated by trying to list projects
-    const { stdout } = await execa('supabase', ['projects', 'list'], { stdio: 'pipe' });
+    const { stdout } = await execSupabase(['projects', 'list'], { stdio: 'pipe' });
     return stdout.includes('ID') || stdout.includes('Name'); // Basic check for project list output
   } catch (error) {
     // Not authenticated
@@ -54,10 +55,10 @@ async function authenticateSupabaseCLI(): Promise<boolean> {
 
   try {
     console.log(chalk.blue('Opening browser for Supabase authentication...'));
-    await execa('supabase', ['login'], { stdio: 'inherit' });
+    await execSupabase(['login'], { stdio: 'inherit' });
     
     // Verify authentication worked
-    await execa('supabase', ['projects', 'list'], { stdio: 'pipe' });
+    await execSupabase(['projects', 'list'], { stdio: 'pipe' });
     logger.success('Successfully authenticated with Supabase!');
     return true;
   } catch (error) {
@@ -68,7 +69,7 @@ async function authenticateSupabaseCLI(): Promise<boolean> {
 
 async function listSupabaseProjects(): Promise<SupabaseProject[]> {
   try {
-    const { stdout } = await execa('supabase', ['projects', 'list', '--output', 'json'], { stdio: 'pipe' });
+    const { stdout } = await execSupabase(['projects', 'list', '--output', 'json'], { stdio: 'pipe' });
     const projects = JSON.parse(stdout);
     return Array.isArray(projects) ? projects : [];
   } catch (error) {
@@ -86,7 +87,7 @@ async function createSupabaseProject(name: string, orgId?: string): Promise<Supa
       args.push('--org-id', orgId);
     }
     
-    const { stdout } = await execa('supabase', args, { stdio: 'pipe' });
+    const { stdout } = await execSupabase(args, { stdio: 'pipe' });
     const project = JSON.parse(stdout);
     spinner.succeed(`Project "${name}" created successfully!`);
     return project;

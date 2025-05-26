@@ -1,9 +1,9 @@
 import inquirer from 'inquirer';
 import chalk from 'chalk';
-import { execa } from 'execa';
 import ora from 'ora';
 import { logger } from '../utils/logger.js';
 import { validateWorkerName } from '../utils/validation.js';
+import { execWrangler } from '../utils/cli.js';
 
 interface CloudflareConfig {
   workerName: string;
@@ -11,7 +11,7 @@ interface CloudflareConfig {
 
 async function checkWranglerAuth(): Promise<boolean> {
   try {
-    const { stdout } = await execa('wrangler', ['whoami'], { stdio: 'pipe' });
+    const { stdout } = await execWrangler(['whoami']);
     return stdout.includes('@') || stdout.includes('You are logged in');
   } catch {
     return false;
@@ -37,7 +37,7 @@ async function authenticateWrangler(): Promise<boolean> {
   const spinner = ora('Opening browser for Cloudflare authentication...').start();
   
   try {
-    await execa('wrangler', ['login'], { stdio: 'inherit' });
+    await execWrangler(['login'], { stdio: 'inherit' });
     
     // Verify authentication worked
     const isAuthenticated = await checkWranglerAuth();

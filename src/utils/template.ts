@@ -1,7 +1,7 @@
-import { execa } from 'execa';
 import fs from 'fs-extra';
 import path from 'path';
 import { logger } from './logger.js';
+import { execGit } from './cli.js';
 
 export function validateTemplateUrl(url: string): boolean {
   try {
@@ -27,7 +27,7 @@ export async function cloneTemplate(templateUrl: string, targetDirectory: string
   
   try {
     // Clone the repository
-    await execa('git', ['clone', templateUrl, targetDirectory], {
+    await execGit(['clone', templateUrl, targetDirectory], {
       stdio: 'pipe'
     });
     
@@ -37,6 +37,9 @@ export async function cloneTemplate(templateUrl: string, targetDirectory: string
       throw new Error(`Invalid template structure. The repository does not appear to be a valid Volo app template.`);
     }
     
+    // Replace README.md with README.template.md for CLI users
+    await replaceReadmeForCli(targetDirectory);
+    
     // Remove .git directory to start fresh
     const gitDir = path.join(targetDirectory, '.git');
     if (await fs.pathExists(gitDir)) {
@@ -45,9 +48,9 @@ export async function cloneTemplate(templateUrl: string, targetDirectory: string
     }
     
     // Initialize new git repository
-    await execa('git', ['init'], { cwd: targetDirectory, stdio: 'pipe' });
-    await execa('git', ['add', '.'], { cwd: targetDirectory, stdio: 'pipe' });
-    await execa('git', ['commit', '-m', 'Initial commit from create-volo-app'], { 
+    await execGit(['init'], { cwd: targetDirectory, stdio: 'pipe' });
+    await execGit(['add', '.'], { cwd: targetDirectory, stdio: 'pipe' });
+    await execGit(['commit', '-m', 'Initial commit from create-volo-app'], { 
       cwd: targetDirectory, 
       stdio: 'pipe' 
     });
@@ -60,6 +63,20 @@ export async function cloneTemplate(templateUrl: string, targetDirectory: string
       await fs.remove(targetDirectory);
     }
     throw new Error(`Failed to clone template: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function replaceReadmeForCli(templatePath: string): Promise<void> {
+  const readmePath = path.join(templatePath, 'README.md');
+  const templateReadmePath = path.join(templatePath, 'README.template.md');
+  
+  // Check if template README exists
+  if (await fs.pathExists(templateReadmePath)) {
+    // Replace the main README with the template version
+    await fs.move(templateReadmePath, readmePath, { overwrite: true });
+    logger.debug('Replaced README.md with template version for CLI users');
+  } else {
+    logger.debug('No README.template.md found, keeping original README.md');
   }
 }
 

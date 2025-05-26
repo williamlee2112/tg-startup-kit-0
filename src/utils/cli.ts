@@ -1,0 +1,81 @@
+import { execa } from 'execa';
+import which from 'which';
+import { logger } from './logger.js';
+
+interface CliOptions {
+  stdio?: 'pipe' | 'inherit';
+  timeout?: number;
+  cwd?: string;
+}
+
+/**
+ * Executes a CLI command, trying global installation first, then local via npx
+ */
+export async function execCli(
+  command: string,
+  args: string[],
+  options: CliOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  const defaultOptions = {
+    stdio: 'pipe' as const,
+    timeout: 30000,
+    ...options
+  };
+
+  // First try global installation
+  try {
+    await which(command);
+    logger.debug(`Using global ${command}`);
+    return await execa(command, args, defaultOptions);
+  } catch (globalError) {
+    logger.debug(`Global ${command} not found, trying local installation`);
+    
+    // Try local installation via npx
+    try {
+      return await execa('npx', [command, ...args], defaultOptions);
+    } catch (localError) {
+      logger.debug(`Local ${command} via npx also failed`);
+      throw new Error(`Failed to execute ${command}: ${localError instanceof Error ? localError.message : String(localError)}`);
+    }
+  }
+}
+
+/**
+ * Executes Firebase CLI command
+ */
+export async function execFirebase(
+  args: string[],
+  options: CliOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  return execCli('firebase', args, options);
+}
+
+/**
+ * Executes Wrangler CLI command
+ */
+export async function execWrangler(
+  args: string[],
+  options: CliOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  return execCli('wrangler', args, options);
+}
+
+/**
+ * Executes Git command
+ */
+export async function execGit(
+  args: string[],
+  options: CliOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  return execCli('git', args, options);
+}
+
+/**
+ * Executes Supabase CLI command
+ */
+export async function execSupabase(
+  args: string[],
+  options: CliOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  return execCli('supabase', args, options);
+} 

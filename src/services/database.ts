@@ -1,9 +1,9 @@
 import inquirer from 'inquirer';
 import chalk from 'chalk';
-import { execa } from 'execa';
 import ora from 'ora';
 import { logger } from '../utils/logger.js';
 import { validateUrl } from '../utils/validation.js';
+import { execNeonctl } from '../utils/neonctl.js';
 
 interface DatabaseConfig {
   url: string;
@@ -17,7 +17,7 @@ interface NeonProject {
   pg_version: number;
 }
 
-export async function setupNeon(databasePreference?: string): Promise<DatabaseConfig> {
+export async function setupDatabase(databasePreference?: string): Promise<DatabaseConfig> {
   logger.step('Setting up PostgreSQL Database...');
   logger.newLine();
 
@@ -75,7 +75,7 @@ export async function setupNeon(databasePreference?: string): Promise<DatabaseCo
 
 async function checkNeonCLI(): Promise<boolean> {
   try {
-    await execa('npx', ['neonctl', '--version'], { stdio: 'pipe' });
+    await execNeonctl(['--version'], { stdio: 'pipe' });
     return true;
   } catch (error) {
     return false;
@@ -85,7 +85,7 @@ async function checkNeonCLI(): Promise<boolean> {
 async function authenticateNeonCLI(): Promise<boolean> {
   try {
     // Check if already authenticated
-    const { stdout } = await execa('npx', ['neonctl', 'me'], { stdio: 'pipe' });
+    const { stdout } = await execNeonctl(['me'], { stdio: 'pipe' });
     if (stdout.includes('@')) {
       return true;
     }
@@ -112,10 +112,10 @@ async function authenticateNeonCLI(): Promise<boolean> {
 
   try {
     console.log(chalk.blue('Opening browser for Neon authentication...'));
-    await execa('npx', ['neonctl', 'auth'], { stdio: 'inherit' });
+    await execNeonctl(['auth'], { stdio: 'inherit' });
     
     // Verify authentication worked
-    await execa('npx', ['neonctl', 'me'], { stdio: 'pipe' });
+    await execNeonctl(['me'], { stdio: 'pipe' });
     logger.success('Successfully authenticated with Neon!');
     return true;
   } catch (error) {
@@ -126,7 +126,7 @@ async function authenticateNeonCLI(): Promise<boolean> {
 
 async function listNeonProjects(): Promise<NeonProject[]> {
   try {
-    const { stdout } = await execa('npx', ['neonctl', 'projects', 'list', '--output', 'json'], { stdio: 'pipe' });
+    const { stdout } = await execNeonctl(['projects', 'list', '--output', 'json'], { stdio: 'pipe' });
     const data = JSON.parse(stdout);
     return data.projects || [];
   } catch (error) {
@@ -139,7 +139,7 @@ async function createNeonProject(name: string): Promise<NeonProject | null> {
   const spinner = ora('Creating new Neon project...').start();
   
   try {
-    const { stdout } = await execa('npx', ['neonctl', 'projects', 'create', '--output', 'json', '--name', name], { stdio: 'pipe' });
+    const { stdout } = await execNeonctl(['projects', 'create', '--output', 'json', '--name', name], { stdio: 'pipe' });
     const project = JSON.parse(stdout).project;
     spinner.succeed(`Project "${name}" created successfully!`);
     return project;
@@ -152,7 +152,7 @@ async function createNeonProject(name: string): Promise<NeonProject | null> {
 
 async function getNeonConnectionString(projectId: string): Promise<string | null> {
   try {
-    const { stdout } = await execa('npx', ['neonctl', 'connection-string', '--project-id', projectId], { stdio: 'pipe' });
+    const { stdout } = await execNeonctl(['connection-string', '--project-id', projectId], { stdio: 'pipe' });
     return stdout.trim();
   } catch (error) {
     logger.debug(`Failed to get connection string: ${error}`);

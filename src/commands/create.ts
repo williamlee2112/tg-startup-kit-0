@@ -7,10 +7,10 @@ import ora from 'ora';
 import { logger } from '../utils/logger.js';
 import { cloneTemplate } from '../utils/template.js';
 import { setupFirebase } from '../services/firebase.js';
-import { setupNeon } from '../services/neon.js';
 import { setupCloudflare } from '../services/cloudflare.js';
 import { generateConfigFiles } from '../utils/config.js';
 import { validateProjectName } from '../utils/validation.js';
+import { setupDatabase } from '../services/database.js';
 
 interface CreateOptions {
   template: string;
@@ -201,15 +201,15 @@ async function setupDatabaseWithRetry(databasePreference?: string, maxRetries = 
     try {
       switch (databasePreference) {
         case 'neon':
-          return await setupNeon();
+          return await setupDatabase(databasePreference);
         case 'supabase':
           const { setupSupabaseDatabase } = await import('../services/supabase.js');
           return await setupSupabaseDatabase();
         case 'other':
-          const { setupOtherDatabase } = await import('../services/neon.js');
+          const { setupOtherDatabase } = await import('../services/database.js');
           return await setupOtherDatabase();
         default:
-          return await setupNeon(); // fallback
+          return await setupDatabase(databasePreference); // fallback
       }
     } catch (error) {
       logger.warning(`Database setup failed (attempt ${attempt}/${maxRetries})`);
