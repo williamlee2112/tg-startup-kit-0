@@ -75,9 +75,18 @@ export async function setupDatabase(databasePreference?: string): Promise<Databa
 
 async function checkNeonCLI(): Promise<boolean> {
   try {
-    await execNeonctl(['--version'], { stdio: 'pipe' });
+    logger.debug('Checking if neonctl CLI is available...');
+    await execNeonctl(['--version'], { stdio: 'pipe', timeout: 10000 }); // 10 second timeout
+    logger.debug('neonctl CLI check successful');
     return true;
-  } catch (error) {
+  } catch (error: any) {
+    if (error.message.includes('neonctl is not available and could not be installed globally')) {
+      logger.debug('Failed to install neonctl globally');
+    } else if (error.message.includes('command timed out')) {
+      logger.debug('neonctl CLI check timed out');
+    } else {
+      logger.debug(`neonctl CLI check failed: ${error.message}`);
+    }
     return false;
   }
 }
@@ -164,12 +173,39 @@ async function setupNeonDatabase(): Promise<DatabaseConfig> {
   logger.info('Setting up Neon database...');
   logger.newLine();
 
-  // Check if Neon CLI is available
-  const hasNeonCLI = await checkNeonCLI();
+  // Check if Neon CLI is available with a timeout fallback
+  logger.debug('Starting neonctl CLI availability check...');
+  let hasNeonCLI = false;
+  
+  try {
+    // Race between CLI check and timeout
+    hasNeonCLI = await Promise.race([
+      checkNeonCLI(),
+      new Promise<boolean>((resolve) => {
+        setTimeout(() => {
+          logger.debug('CLI check timed out, falling back to manual setup');
+          resolve(false);
+        }, 15000); // 15 second overall timeout
+      })
+    ]);
+  } catch (error) {
+    logger.debug(`CLI check failed with error: ${error}`);
+    hasNeonCLI = false;
+  }
+  
   if (!hasNeonCLI) {
-    logger.warning('Neon CLI not found. Using manual setup instead.');
+    logger.warning('Neon CLI not available or could not be installed.');
+    logger.info('This can happen when:');
+    logger.info('  • npm global installation permissions are restricted');
+    logger.info('  • Network connectivity issues during installation');
+    logger.info('  • The neonctl package is not available in npm registry');
+    logger.info('Using manual setup instead - you\'ll need to create the database yourself.');
+    logger.newLine();
     return await setupNeonDatabaseManual();
   }
+
+  logger.success('Neon CLI is available!');
+  logger.newLine();
 
   // Authenticate with Neon
   const isAuthenticated = await authenticateNeonCLI();

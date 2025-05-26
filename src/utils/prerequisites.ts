@@ -83,14 +83,11 @@ const databasePrerequisites: Record<string, Prerequisite> = {
   neon: {
     name: 'Neon CLI',
     command: 'skip',
-    version: 'neonctl --version',
+    version: 'skip',
     installUrl: 'https://neon.tech/docs/reference/neon-cli',
-    description: 'Neon CLI for managing PostgreSQL databases (installed via npx)',
+    description: 'Neon CLI for managing PostgreSQL databases (bundled with create-volo-app)',
     optional: true,
-    checkVersion: (output) => {
-      const match = output.match(/(\d+\.\d+\.\d+)/);
-      return match ? match[1] : null;
-    }
+    checkVersion: () => 'bundled'
   },
   supabase: {
     name: 'Supabase CLI',
@@ -153,6 +150,11 @@ async function checkLocalCliTool(prereq: Prerequisite): Promise<{ status: 'ok' |
     return { status: 'missing' };
   }
 
+  // Skip npx check for bundled dependencies to avoid nested npx calls
+  if (prereq.command === 'skip') {
+    return { status: 'ok', currentVersion: 'bundled' };
+  }
+
   try {
     // Try to run the locally installed CLI tool via npx
     const { stdout } = await execa('npx', [prereq.command, prereq.version || '--version'], {
@@ -212,6 +214,11 @@ async function checkDatabaseChoice(): Promise<string | null> {
 
 async function checkPrerequisite(prereq: Prerequisite): Promise<{ status: 'ok' | 'missing' | 'outdated' | 'installed_locally', currentVersion?: string | null }> {
   try {
+    // Handle bundled dependencies that don't need CLI checks
+    if (prereq.command === 'skip' && prereq.version === 'skip') {
+      return { status: 'ok', currentVersion: 'bundled' };
+    }
+    
     // First, check if command exists globally
     if (prereq.command === 'skip') {
       return { status: 'ok', currentVersion: 'available via npx' };
