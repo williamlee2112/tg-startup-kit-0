@@ -1,0 +1,397 @@
+import inquirer from 'inquirer';
+import { execa } from 'execa';
+import chalk from 'chalk';
+import ora from 'ora';
+import { logger } from '../utils/logger.js';
+import { validateFirebaseProjectId } from '../utils/validation.js';
+
+interface FirebaseConfig {
+  projectId: string;
+  apiKey: string;
+  messagingSenderId: string;
+  appId: string;
+  measurementId: string;
+}
+
+export async function setupFirebase(): Promise<FirebaseConfig> {
+  logger.step('Setting up Firebase Authentication...');
+  logger.newLine();
+
+  console.log(chalk.gray('Firebase provides authentication, hosting, and other backend services.'));
+  console.log(chalk.gray('We\'ll help you create a project and configure Google Sign-In.'));
+  logger.newLine();
+
+  // Check if user is logged into Firebase
+  const isLoggedIn = await checkFirebaseAuth();
+  if (!isLoggedIn) {
+    await loginToFirebase();
+  }
+
+  // Choose between creating new project or using existing
+  const { action } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'action',
+      message: 'Would you like to create a new Firebase project or use an existing one?',
+      choices: [
+        { name: 'Create a new Firebase project', value: 'create' },
+        { name: 'Use an existing Firebase project', value: 'existing' }
+      ]
+    }
+  ]);
+
+  let projectId: string;
+
+  if (action === 'create') {
+    projectId = await createFirebaseProject();
+  } else {
+    projectId = await selectExistingProject();
+  }
+
+  // Set up authentication
+  await setupFirebaseAuth(projectId);
+
+  // Create and configure web app
+  const webAppConfig = await createWebApp(projectId);
+
+  logger.success('Firebase setup completed!');
+  logger.newLine();
+
+  return webAppConfig;
+}
+
+async function checkFirebaseAuth(): Promise<boolean> {
+  try {
+    const { stdout } = await execa('firebase', ['login:list'], { stdio: 'pipe' });
+    return stdout.includes('@');
+  } catch {
+    return false;
+  }
+}
+
+async function loginToFirebase(): Promise<void> {
+  logger.info('You need to log in to Firebase first.');
+  
+  const { proceed } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'proceed',
+      message: 'Open Firebase login in your browser?',
+      default: true
+    }
+  ]);
+
+  if (!proceed) {
+    throw new Error('Firebase login is required to continue');
+  }
+
+  const spinner = ora('Opening Firebase login...').start();
+  
+  try {
+    await execa('firebase', ['login'], { stdio: 'inherit' });
+    spinner.succeed('Firebase login completed');
+  } catch (error) {
+    spinner.fail('Firebase login failed');
+    throw new Error('Failed to log in to Firebase');
+  }
+}
+
+async function createFirebaseProject(): Promise<string> {
+  const { projectId } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'projectId',
+      message: 'Enter a project ID for your new Firebase project:',
+      validate: (input: string) => {
+        if (!input.trim()) {
+          return 'Project ID is required';
+        }
+        if (!validateFirebaseProjectId(input)) {
+          return 'Project ID must be 6-30 characters, lowercase letters, numbers, and hyphens only, start with letter';
+        }
+        return true;
+      }
+    }
+  ]);
+
+  const { displayName } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'displayName',
+      message: 'Enter a display name for your project:',
+      default: projectId
+    }
+  ]);
+
+  const spinner = ora(`Creating Firebase project "${projectId}"...`).start();
+
+  try {
+    await execa('firebase', ['projects:create', projectId, '--display-name', displayName], {
+      stdio: 'pipe'
+    });
+    spinner.succeed(`Firebase project "${projectId}" created successfully`);
+    return projectId;
+  } catch (error) {
+    spinner.fail('Failed to create Firebase project');
+    
+    // Check if project ID already exists
+    if (error instanceof Error && error.message.includes('already exists')) {
+      logger.warning(`Project ID "${projectId}" already exists. Please choose a different one.`);
+      return await createFirebaseProject();
+    }
+    
+    throw new Error(`Failed to create Firebase project: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function selectExistingProject(): Promise<string> {
+  const spinner = ora('Fetching your Firebase projects...').start();
+  
+  try {
+    const { stdout } = await execa('firebase', ['projects:list', '-j'], { stdio: 'pipe' });
+    const response = JSON.parse(stdout);
+    
+    // Extract projects from the nested response
+    const projects = response.result;
+    
+    spinner.stop();
+    
+    if (!projects || projects.length === 0) {
+      logger.info('No existing Firebase projects found. Let\'s create a new one.');
+      return await createFirebaseProject();
+    }
+    
+    const { projectId } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'projectId',
+        message: 'Select a Firebase project:',
+        choices: projects.map((project: any) => ({
+          name: `${project.displayName || project.projectId} (${project.projectId})`,
+          value: project.projectId
+        }))
+      }
+    ]);
+    
+    return projectId;
+  } catch (error) {
+    spinner.fail('Failed to fetch Firebase projects');
+    throw new Error(`Failed to fetch projects: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function setupFirebaseAuth(projectId: string): Promise<void> {
+  logger.info('Setting up Firebase Authentication...');
+  logger.newLine();
+
+  console.log(chalk.gray('Firebase Authentication provides secure user login for your app.'));
+  console.log(chalk.gray('We recommend setting up Google Sign-In as it\'s the most popular option.'));
+  logger.newLine();
+
+  const { setupGoogleAuth } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'setupGoogleAuth',
+      message: 'Would you like to set up Google Sign-In now?',
+      default: true
+    }
+  ]);
+
+  if (!setupGoogleAuth) {
+    logger.info('Skipping Google Sign-In setup. You can configure authentication later.');
+    console.log(chalk.blue('📚 To set up authentication later:'));
+    console.log(chalk.gray('1. Go to: https://console.firebase.google.com/project/' + projectId + '/authentication/providers'));
+    console.log(chalk.gray('2. Choose your preferred authentication methods'));
+    console.log(chalk.gray('3. Follow the setup instructions for each provider'));
+    logger.newLine();
+    return;
+  }
+
+  // Provide step-by-step Google Sign-In setup
+  logger.info('Setting up Google Sign-In...');
+  logger.newLine();
+
+  console.log(chalk.yellow('📋 Please follow these steps in your browser:'));
+  console.log(chalk.blue('1. Open Firebase Console:'));
+  console.log(chalk.cyan(`   https://console.firebase.google.com/project/${projectId}/authentication/providers`));
+  logger.newLine();
+
+  console.log(chalk.blue('2. Enable Google Sign-In:'));
+  console.log(chalk.gray('   • Click on "Google" in the Sign-in providers list'));
+  console.log(chalk.gray('   • Toggle the "Enable" switch'));
+  console.log(chalk.gray('   • Enter a project support email (your email)'));
+  console.log(chalk.gray('   • Click "Save"'));
+  logger.newLine();
+
+  console.log(chalk.blue('3. Configure authorized domains (for deployment):'));
+  console.log(chalk.gray('   • Go to Authentication > Settings > Authorized domains'));
+  console.log(chalk.gray('   • Add your domain when you deploy (e.g., your-app.pages.dev)'));
+  console.log(chalk.gray('   • localhost is already authorized for development'));
+  logger.newLine();
+
+  console.log(chalk.yellow('⏳ Take your time to complete the setup in the browser...'));
+  logger.newLine();
+
+  const { completed } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'completed',
+      message: 'Have you completed the Google Sign-In setup in Firebase Console?',
+      default: true // Default to 'yes' since they chose to set it up
+    }
+  ]);
+
+  if (completed) {
+    logger.success('Google Sign-In setup completed! 🎉');
+    logger.newLine();
+    console.log(chalk.green('✅ Your app now supports Google authentication'));
+    console.log(chalk.gray('Users will be able to sign in with their Google accounts'));
+  } else {
+    logger.warning('Google Sign-In setup incomplete.');
+    logger.info('Don\'t worry! You can complete this setup anytime by:');
+    console.log(chalk.cyan('1. Going to: https://console.firebase.google.com/project/' + projectId + '/authentication/providers'));
+    console.log(chalk.cyan('2. Following the steps outlined above'));
+    logger.newLine();
+    console.log(chalk.yellow('💡 Your app will work for development, but users won\'t be able to sign in until you complete this setup.'));
+  }
+
+  logger.newLine();
+}
+
+async function createWebApp(projectId: string): Promise<FirebaseConfig> {
+  // First, check if there are existing web apps
+  const existingApps = await getExistingWebApps(projectId);
+  
+  let appId: string;
+  
+  if (existingApps.length > 0) {
+    logger.info(`Found ${existingApps.length} existing web app(s) in this project.`);
+    
+    const { action } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'action',
+        message: 'Would you like to use an existing web app or create a new one?',
+        choices: [
+          { name: 'Use an existing web app', value: 'existing' },
+          { name: 'Create a new web app', value: 'create' }
+        ]
+      }
+    ]);
+    
+    if (action === 'existing') {
+      const { selectedAppId } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'selectedAppId',
+          message: 'Select a web app:',
+          choices: existingApps.map((app: any) => ({
+            name: `${app.displayName || 'Unnamed App'} (${app.appId})`,
+            value: app.appId
+          }))
+        }
+      ]);
+      appId = selectedAppId;
+    } else {
+      appId = await createNewWebApp(projectId);
+    }
+  } else {
+    logger.info('No existing web apps found. Creating a new one...');
+    appId = await createNewWebApp(projectId);
+  }
+  
+  // Get app configuration
+  return await getWebAppConfig(projectId, appId);
+}
+
+async function getExistingWebApps(projectId: string): Promise<any[]> {
+  try {
+    const { stdout } = await execa('firebase', ['apps:list', 'WEB', '--project', projectId, '-j'], { stdio: 'pipe' });
+    const response = JSON.parse(stdout);
+    return response.result || [];
+  } catch (error) {
+    logger.debug(`Failed to fetch existing apps: ${error}`);
+    return [];
+  }
+}
+
+async function createNewWebApp(projectId: string): Promise<string> {
+  const spinner = ora('Creating Firebase web app...').start();
+  
+  try {
+    // Create web app (remove --json flag as it doesn't work)
+    const { stdout } = await execa('firebase', [
+      'apps:create', 
+      'WEB', 
+      'volo-app',
+      '--project', projectId
+    ], { stdio: 'pipe' });
+    
+    // Try multiple patterns for different CLI versions
+    const patterns = [
+      /- App ID: (.+)/,
+      /App ID:\s*(.+)/,
+      /appId[:\s]+(.+)/i,
+      /App\s+ID[:\s]+(.+)/i
+    ];
+
+    let appId: string | null = null;
+    for (const pattern of patterns) {
+      const match = stdout.match(pattern);
+      if (match) {
+        appId = match[1].trim();
+        break;
+      }
+    }
+
+    if (!appId) {
+      logger.debug(`Firebase CLI output: ${stdout}`);
+      throw new Error('Failed to extract App ID. Please check Firebase CLI output format.');
+    }
+    
+    logger.debug(`Extracted App ID: ${appId}`);
+    spinner.succeed('Firebase web app created successfully');
+    
+    return appId;
+  } catch (error) {
+    spinner.fail('Failed to create Firebase web app');
+    throw error;
+  }
+}
+
+async function getWebAppConfig(projectId: string, appId: string): Promise<FirebaseConfig> {
+  const spinner = ora('Getting web app configuration...').start();
+  
+  try {
+    // Get app configuration
+    const { stdout: configOutput } = await execa('firebase', [
+      'apps:sdkconfig', 
+      'WEB', 
+      appId,
+      '--project', projectId,
+      '--json'
+    ], { stdio: 'pipe' });
+    
+    const config = JSON.parse(configOutput);
+    
+    // Extract the SDK config from the nested response
+    const sdkConfig = config.result?.sdkConfig;
+    if (!sdkConfig) {
+      throw new Error('Invalid response format from Firebase CLI');
+    }
+    
+    spinner.succeed('Firebase web app configured');
+    
+    return {
+      projectId: sdkConfig.projectId,
+      apiKey: sdkConfig.apiKey,
+      messagingSenderId: sdkConfig.messagingSenderId,
+      appId: sdkConfig.appId,
+      measurementId: sdkConfig.measurementId || 'G-PLACEHOLDER'
+    };
+    
+  } catch (error) {
+    spinner.fail('Failed to get web app configuration');
+    throw new Error(`Failed to get web app config: ${error instanceof Error ? error.message : String(error)}`);
+  }
+} 
