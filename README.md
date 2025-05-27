@@ -97,7 +97,7 @@ npx create-volo-app my-app --skip-prereqs --verbose
 
 ## Deployment
 
-Your Volo app is designed for deployment on Cloudflare's platform, providing global edge performance and seamless integration between your frontend and backend.
+Your volo-app is designed for deployment on Cloudflare's platform, providing global edge performance and seamless integration between your frontend and backend.
 
 ### Prerequisites
 

@@ -17,7 +17,7 @@ interface NeonProject {
   pg_version: number;
 }
 
-export async function setupDatabase(databasePreference?: string): Promise<DatabaseConfig> {
+export async function setupDatabase(databasePreference?: string, fastMode = false, projectName?: string): Promise<DatabaseConfig> {
   logger.newLine();
   console.log(chalk.yellow.bold('🗄️  Setting up PostgreSQL Database'));
   console.log(chalk.white('Your app needs a database to store application data (posts, user profiles, etc).'));
@@ -29,6 +29,10 @@ export async function setupDatabase(databasePreference?: string): Promise<Databa
   if (databasePreference && ['neon', 'supabase', 'other'].includes(databasePreference)) {
     provider = databasePreference;
     logger.info(`Using your preferred database provider: ${provider}`);
+    logger.newLine();
+  } else if (fastMode) {
+    provider = 'neon'; // Default to Neon in fast mode
+    logger.info('Using Neon as database provider (fast mode default)');
     logger.newLine();
   } else {
     const { selectedProvider } = await inquirer.prompt([
@@ -60,11 +64,11 @@ export async function setupDatabase(databasePreference?: string): Promise<Databa
 
   switch (provider) {
     case 'neon':
-      return await setupNeonDatabase();
+      return await setupNeonDatabase(fastMode, projectName);
     case 'supabase':
       // Import and use the dedicated Supabase service
       const { setupSupabaseDatabase } = await import('./supabase.js');
-      return await setupSupabaseDatabase();
+      return await setupSupabaseDatabase(fastMode, projectName);
     case 'other':
       return await setupOtherDatabase();
     default:
@@ -144,19 +148,38 @@ async function listNeonProjects(): Promise<NeonProject[]> {
   }
 }
 
-async function createNeonProject(name: string): Promise<NeonProject | null> {
-  const spinner = ora('Creating new Neon project...').start();
-  
-  try {
-    const { stdout } = await execNeonctl(['projects', 'create', '--output', 'json', '--name', name], { stdio: 'pipe' });
-    const project = JSON.parse(stdout).project;
-    spinner.succeed(`Project "${name}" created successfully!`);
-    return project;
-  } catch (error) {
-    spinner.fail('Failed to create project');
-    logger.debug(`Project creation error: ${error}`);
-    return null;
+async function createNeonProject(baseName: string): Promise<NeonProject | null> {
+  let projectName = baseName;
+  let attempt = 0;
+
+  while (attempt < 10) { // Limit attempts to avoid infinite loop
+    const spinner = ora(`Creating new Neon project "${projectName}"...`).start();
+    
+    try {
+      const { stdout } = await execNeonctl(['projects', 'create', '--output', 'json', '--name', projectName], { stdio: 'pipe' });
+      const project = JSON.parse(stdout).project;
+      spinner.succeed(`Project "${projectName}" created successfully!`);
+      return project;
+    } catch (error) {
+      spinner.stop();
+      
+      // Check if it's a name conflict error
+      if (error instanceof Error && (error.message.includes('already exists') || error.message.includes('name is taken'))) {
+        attempt++;
+        projectName = `${baseName}-${attempt}`;
+        logger.debug(`Project name "${baseName}" exists, trying "${projectName}"`);
+        continue;
+      }
+      
+      // Other error, fail immediately
+      spinner.fail('Failed to create project');
+      logger.debug(`Project creation error: ${error}`);
+      return null;
+    }
   }
+  
+  logger.warning('Failed to create project after multiple attempts');
+  return null;
 }
 
 async function getNeonConnectionString(projectId: string): Promise<string | null> {
@@ -169,7 +192,7 @@ async function getNeonConnectionString(projectId: string): Promise<string | null
   }
 }
 
-async function setupNeonDatabase(): Promise<DatabaseConfig> {
+async function setupNeonDatabase(fastMode = false, projectName?: string): Promise<DatabaseConfig> {
   logger.info('Setting up Neon database...');
   logger.newLine();
 
@@ -219,29 +242,41 @@ async function setupNeonDatabase(): Promise<DatabaseConfig> {
   const projects = await listNeonProjects();
   spinner.stop();
 
-  if (projects.length === 0) {
-    console.log(chalk.yellow('No existing Neon projects found.'));
+  if (projects.length === 0 || fastMode) {
+    if (projects.length === 0) {
+      console.log(chalk.yellow('No existing Neon projects found.'));
+    } else if (fastMode) {
+      console.log(chalk.blue('Creating new Neon project (fast mode)...'));
+    }
     logger.newLine();
     
-    const { projectName } = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'projectName',
-        message: 'Enter a name for your new Neon project:',
-        default: 'volo-app-db',
-        validate: (input: string) => {
-          if (!input.trim()) {
-            return 'Project name is required';
+    let dbProjectName: string;
+    
+    if (fastMode) {
+      // Use project name in fast mode
+      dbProjectName = `${projectName || 'volo-app'}-db`;
+    } else {
+      const response = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'projectName',
+          message: 'Enter a name for your new Neon project:',
+          default: 'volo-app-db',
+          validate: (input: string) => {
+            if (!input.trim()) {
+              return 'Project name is required';
+            }
+            if (input.length > 63) {
+              return 'Project name must be 63 characters or less';
+            }
+            return true;
           }
-          if (input.length > 63) {
-            return 'Project name must be 63 characters or less';
-          }
-          return true;
         }
-      }
-    ]);
+      ]);
+      dbProjectName = response.projectName;
+    }
 
-    const newProject = await createNeonProject(projectName);
+    const newProject = await createNeonProject(dbProjectName);
     if (!newProject) {
       logger.warning('Failed to create new project. Using manual setup instead.');
       return await setupNeonDatabaseManual();
@@ -262,61 +297,74 @@ async function setupNeonDatabase(): Promise<DatabaseConfig> {
     };
   }
 
-  // User has existing projects
-  console.log(chalk.green(`Found ${projects.length} existing Neon project(s)`));
-  logger.newLine();
-
-  const projectChoices = [
-    ...projects.map(project => ({
-      name: `${project.name} (${project.id})`,
-      value: project.id,
-      short: project.name
-    })),
-    {
-      name: '+ Create a new project',
-      value: 'new',
-      short: 'New project'
-    }
-  ];
-
-  const { selectedProject } = await inquirer.prompt([
-    {
-      type: 'list',
-      name: 'selectedProject',
-      message: 'Which Neon project would you like to use?',
-      choices: projectChoices
-    }
-  ]);
-
+  // Declare projectId at function scope
   let projectId: string;
 
-  if (selectedProject === 'new') {
-    const { projectName } = await inquirer.prompt([
+  // User has existing projects but not in fast mode
+  if (!fastMode) {
+    console.log(chalk.green(`Found ${projects.length} existing Neon project(s)`));
+    logger.newLine();
+
+    const projectChoices = [
+      ...projects.map(project => ({
+        name: `${project.name} (${project.id})`,
+        value: project.id,
+        short: project.name
+      })),
       {
-        type: 'input',
-        name: 'projectName',
-        message: 'Enter a name for your new Neon project:',
-        default: 'volo-app-db',
-        validate: (input: string) => {
-          if (!input.trim()) {
-            return 'Project name is required';
-          }
-          if (input.length > 63) {
-            return 'Project name must be 63 characters or less';
-          }
-          return true;
-        }
+        name: '+ Create a new project',
+        value: 'new',
+        short: 'New project'
+      }
+    ];
+
+    const { selectedProject } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'selectedProject',
+        message: 'Which Neon project would you like to use?',
+        choices: projectChoices
       }
     ]);
 
-    const newProject = await createNeonProject(projectName);
+    if (selectedProject === 'new') {
+      const { dbProjectName } = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'dbProjectName',
+          message: 'Enter a name for your new Neon project:',
+          default: `${projectName || 'volo-app'}-db`,
+          validate: (input: string) => {
+            if (!input.trim()) {
+              return 'Project name is required';
+            }
+            if (input.length > 63) {
+              return 'Project name must be 63 characters or less';
+            }
+            return true;
+          }
+        }
+      ]);
+
+      const newProject = await createNeonProject(dbProjectName);
+      if (!newProject) {
+        logger.warning('Failed to create new project. Using manual setup instead.');
+        return await setupNeonDatabaseManual();
+      }
+      projectId = newProject.id;
+    } else {
+      projectId = selectedProject;
+    }
+  } else {
+    // Fast mode: create new project even if existing ones exist
+    const dbProjectName = `${projectName || 'volo-app'}-db`;
+    
+    const newProject = await createNeonProject(dbProjectName);
     if (!newProject) {
       logger.warning('Failed to create new project. Using manual setup instead.');
       return await setupNeonDatabaseManual();
     }
     projectId = newProject.id;
-  } else {
-    projectId = selectedProject;
   }
 
   // Get connection string for the selected/created project

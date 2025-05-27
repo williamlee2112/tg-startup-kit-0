@@ -12,9 +12,13 @@ import { generateConfigFiles } from '../utils/config.js';
 import { validateProjectName } from '../utils/validation.js';
 import { setupDatabase } from '../services/database.js';
 import { withProgress } from '../utils/progress.js';
+import { execFirebase } from '../utils/cli.js';
+import { execNeonctl } from '../utils/neonctl.js';
 
 interface CreateOptions {
   template: string;
+  db?: string;
+  fast?: boolean;
   skipPrereqs: boolean;
   verbose: boolean;
   databasePreference?: string;
@@ -37,6 +41,117 @@ interface ProjectConfig {
   cloudflare: {
     workerName: string;
   };
+}
+
+interface AuthStatus {
+  firebase: boolean;
+  neon: boolean;
+  cloudflare: boolean;
+}
+
+async function checkAuthenticationStatus(databaseProvider?: string): Promise<AuthStatus> {
+  const status: AuthStatus = {
+    firebase: false,
+    neon: false,
+    cloudflare: false
+  };
+
+  // Check Firebase auth
+  try {
+    const { stdout } = await execFirebase(['login:list'], { stdio: 'pipe' });
+    status.firebase = stdout.includes('@');
+  } catch {
+    status.firebase = false;
+  }
+
+  // Check Neon auth (only if using Neon)
+  if (databaseProvider === 'neon') {
+    try {
+      const { stdout } = await execNeonctl(['me'], { stdio: 'pipe' });
+      status.neon = stdout.includes('@');
+    } catch {
+      status.neon = false;
+    }
+  } else {
+    status.neon = true; // Not needed for other providers
+  }
+
+  // Check Cloudflare auth
+  try {
+    const { execa } = await import('execa');
+    const { stdout } = await execa('wrangler', ['whoami'], { stdio: 'pipe' });
+    status.cloudflare = stdout.includes('@') || stdout.includes('You are logged in');
+  } catch {
+    status.cloudflare = false;
+  }
+
+  return status;
+}
+
+async function handleBatchAuthentication(authStatus: AuthStatus, databaseProvider?: string): Promise<void> {
+  const needsAuth: string[] = [];
+  
+  if (!authStatus.firebase) needsAuth.push('Firebase');
+  if (!authStatus.neon && databaseProvider === 'neon') needsAuth.push('Neon');
+  if (!authStatus.cloudflare) needsAuth.push('Cloudflare');
+
+  if (needsAuth.length === 0) {
+    logger.success('All services are already authenticated! ✨');
+    return;
+  }
+
+  logger.newLine();
+  console.log(chalk.yellow.bold('🔐 Authentication Required'));
+  console.log(chalk.white(`We need to authenticate with ${needsAuth.length} service${needsAuth.length > 1 ? 's' : ''}:`));
+  
+  for (const service of needsAuth) {
+    console.log(chalk.white(`  • ${service}`));
+  }
+  
+  logger.newLine();
+  console.log(chalk.white('This will open browser tabs for secure authentication.'));
+  console.log(chalk.white('Each authentication takes about 30 seconds.'));
+  logger.newLine();
+
+  const { proceed } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'proceed',
+      message: `Open ${needsAuth.length} browser tab${needsAuth.length > 1 ? 's' : ''} for authentication?`,
+      default: true
+    }
+  ]);
+
+  if (!proceed) {
+    throw new Error('Authentication is required to continue');
+  }
+
+  // Authenticate services sequentially (browser-based auth can't be truly parallel)
+  for (const service of needsAuth) {
+    const spinner = ora(`Authenticating with ${service}...`).start();
+    
+    try {
+      switch (service) {
+        case 'Firebase':
+          await execFirebase(['login'], { stdio: 'inherit' });
+          break;
+        case 'Neon':
+          await execNeonctl(['auth'], { stdio: 'inherit' });
+          break;
+        case 'Cloudflare':
+          const { execa } = await import('execa');
+          await execa('wrangler', ['login'], { stdio: 'inherit' });
+          break;
+      }
+      spinner.succeed(`${service} authentication completed`);
+    } catch (error) {
+      spinner.fail(`${service} authentication failed`);
+      throw new Error(`Failed to authenticate with ${service}`);
+    }
+  }
+
+  logger.newLine();
+  logger.success('All authentications completed! 🎉');
 }
 
 export async function createApp(projectName: string | undefined, options: CreateOptions): Promise<void> {
@@ -80,21 +195,40 @@ export async function createApp(projectName: string | undefined, options: Create
     throw error;
   }
 
-  // Step 2: Gather configuration
+  // Step 2: Handle authentication and configuration
   logger.newLine();
-  console.log(chalk.cyan.bold('🔧 Setting up your app services...'));
-  console.log(chalk.white('Your Volo app needs three key services to work:'));
-  console.log(chalk.white('  • Firebase - for user authentication (login/signup)'));
-  console.log(chalk.white('  • Database - for storing your app data'));
-  console.log(chalk.white('  • Cloudflare - for hosting your app globally'));
-  logger.newLine();
+  
+  // Determine database provider (prioritize --db flag, then databasePreference, then default to neon in fast mode)
+  const databaseProvider = options.db || options.databasePreference || (options.fast ? 'neon' : undefined);
+  
+  if (options.fast) {
+    console.log(chalk.cyan.bold('🚀 Fast Mode: Setting up your app with smart defaults...'));
+    console.log(chalk.white('Your volo-app will be configured with:'));
+    console.log(chalk.white('  • Firebase - new project with auto-generated name'));
+    console.log(chalk.white(`  • Database - ${databaseProvider || 'Neon'} (new database)`));
+    console.log(chalk.white('  • Cloudflare - new worker with auto-generated name'));
+    logger.newLine();
+    console.log(chalk.gray('Note: Google Sign-In will be skipped but can be set up later in Firebase Console.'));
+    logger.newLine();
+  } else {
+    console.log(chalk.cyan.bold('🔧 Setting up your app services...'));
+    console.log(chalk.white('Your volo-app needs three key services to work:'));
+    console.log(chalk.white('  • Firebase - for user authentication (login/signup)'));
+    console.log(chalk.white('  • Database - for storing your app data'));
+    console.log(chalk.white('  • Cloudflare - for hosting your app globally'));
+    logger.newLine();
+  }
+
+  // Check authentication status
+  const authStatus = await checkAuthenticationStatus(databaseProvider);
+  await handleBatchAuthentication(authStatus, databaseProvider);
 
   const config: ProjectConfig = {
     name,
     directory,
-    firebase: await setupFirebaseWithRetry(),
-    database: await setupDatabaseWithRetry(options.databasePreference),
-    cloudflare: await setupCloudflare(name)
+    firebase: await setupFirebaseWithRetry(undefined, options.fast, name),
+    database: await setupDatabaseWithRetry(databaseProvider, undefined, options.fast, name),
+    cloudflare: await setupCloudflare(name, options.fast)
   };
 
   // Step 3: Generate configuration files
@@ -146,7 +280,7 @@ export async function createApp(projectName: string | undefined, options: Create
 
   // Step 5: Success message
   logger.newLine();
-  logger.success('🎉 Your Volo app has been created successfully!');
+  logger.success('🎉 Your volo-app has been created successfully!');
   logger.newLine();
   
   console.log(chalk.cyan.bold('🚀 What you got:'));
@@ -160,6 +294,16 @@ export async function createApp(projectName: string | undefined, options: Create
   console.log(chalk.green.bold('▶️  Next steps:'));
   console.log(chalk.cyan(`   cd ${name}`));
   console.log(chalk.cyan('   pnpm run dev:start'));
+  
+  if (options.fast) {
+    logger.newLine();
+    console.log(chalk.yellow.bold('📝 Optional: Set up Google Sign-In'));
+    console.log(chalk.white('   1. Visit Firebase Console: https://console.firebase.google.com'));
+    console.log(chalk.white(`   2. Go to your project: ${config.firebase.projectId}`));
+    console.log(chalk.white('   3. Navigate to Authentication > Sign-in method'));
+    console.log(chalk.white('   4. Enable Google provider'));
+  }
+  
   logger.newLine();
   
   // Ask if user wants to start the app now
@@ -174,7 +318,7 @@ export async function createApp(projectName: string | undefined, options: Create
 
   if (startNow) {
     logger.newLine();
-    console.log(chalk.green('🚀 Starting your Volo app...'));
+    console.log(chalk.green('🚀 Starting your volo-app...'));
     logger.newLine();
     
     try {
@@ -229,10 +373,10 @@ async function getProjectName(provided?: string): Promise<string> {
   return name;
 }
 
-async function setupFirebaseWithRetry(maxRetries = 2): Promise<ProjectConfig['firebase']> {
+async function setupFirebaseWithRetry(maxRetries = 2, fastMode = false, projectName?: string): Promise<ProjectConfig['firebase']> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await setupFirebase();
+              return await setupFirebase(fastMode, projectName);
     } catch (error) {
       logger.warning(`Firebase setup failed (attempt ${attempt}/${maxRetries})`);
       
@@ -268,20 +412,20 @@ async function setupFirebaseWithRetry(maxRetries = 2): Promise<ProjectConfig['fi
   throw new Error('Firebase setup failed');
 }
 
-async function setupDatabaseWithRetry(databasePreference?: string, maxRetries = 2): Promise<ProjectConfig['database']> {
+async function setupDatabaseWithRetry(databasePreference?: string, maxRetries = 2, fastMode = false, projectName?: string): Promise<ProjectConfig['database']> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       switch (databasePreference) {
         case 'neon':
-          return await setupDatabase(databasePreference);
+          return await setupDatabase(databasePreference, fastMode, projectName);
         case 'supabase':
           const { setupSupabaseDatabase } = await import('../services/supabase.js');
-          return await setupSupabaseDatabase();
+          return await setupSupabaseDatabase(fastMode, projectName);
         case 'other':
           const { setupOtherDatabase } = await import('../services/database.js');
           return await setupOtherDatabase();
         default:
-          return await setupDatabase(databasePreference); // fallback
+          return await setupDatabase(databasePreference, fastMode, projectName); // fallback
       }
     } catch (error) {
       logger.warning(`Database setup failed (attempt ${attempt}/${maxRetries})`);

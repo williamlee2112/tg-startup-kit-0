@@ -58,7 +58,7 @@ async function authenticateWrangler(): Promise<boolean> {
   }
 }
 
-export async function setupCloudflare(projectName: string): Promise<CloudflareConfig> {
+export async function setupCloudflare(projectName: string, fastMode = false): Promise<CloudflareConfig> {
   logger.newLine();
   console.log(chalk.yellow.bold('🌐 Setting up Cloudflare Deployment'));
   console.log(chalk.white('Cloudflare hosts your app globally for lightning-fast performance.'));
@@ -84,23 +84,32 @@ export async function setupCloudflare(projectName: string): Promise<CloudflareCo
   // Generate default worker name based on project name
   const defaultWorkerName = `${projectName}-api`;
 
-  const { workerName } = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'workerName',
-      message: 'Enter a name for your Cloudflare Worker:',
-      default: defaultWorkerName,
-      validate: (input: string) => {
-        if (!input.trim()) {
-          return 'Worker name is required';
+  let workerName: string;
+  
+  if (fastMode) {
+    // In fast mode, use the default worker name without prompting
+    workerName = defaultWorkerName;
+    logger.info(`Using worker name: ${workerName} (fast mode)`);
+  } else {
+    const response = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'workerName',
+        message: 'Enter a name for your Cloudflare Worker:',
+        default: defaultWorkerName,
+        validate: (input: string) => {
+          if (!input.trim()) {
+            return 'Worker name is required';
+          }
+          if (!validateWorkerName(input)) {
+            return 'Worker name should be lowercase, contain only letters, numbers, and hyphens, and not start/end with hyphen';
+          }
+          return true;
         }
-        if (!validateWorkerName(input)) {
-          return 'Worker name should be lowercase, contain only letters, numbers, and hyphens, and not start/end with hyphen';
-        }
-        return true;
       }
-    }
-  ]);
+    ]);
+    workerName = response.workerName;
+  }
 
   // Provide setup instructions
   await provideCloudflareInstructions(workerName, isAuthenticated || await checkWranglerAuth());

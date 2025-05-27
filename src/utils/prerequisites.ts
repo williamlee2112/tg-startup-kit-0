@@ -127,11 +127,11 @@ async function installCliTool(prereq: Prerequisite): Promise<boolean> {
     return false;
   }
 
-  const spinner = ora(`Installing ${prereq.name} locally...`).start();
+  const spinner = ora(`Installing ${prereq.name}...`).start();
   
   try {
-    // Install the CLI tool locally
-    await execa('npm', ['install', prereq.npmPackage], {
+    // Install locally to avoid permission issues and global namespace pollution
+    await execa('npm', ['install', prereq.npmPackage, '--no-save'], {
       stdio: 'pipe',
       cwd: process.cwd()
     });
@@ -176,7 +176,10 @@ async function checkLocalCliTool(prereq: Prerequisite): Promise<{ status: 'ok' |
 }
 
 async function checkDatabaseChoice(): Promise<string | null> {
-  logger.info('To provide better setup experience, which database provider do you plan to use?');
+  console.log(chalk.cyan.bold('👋 Welcome! Let\'s build your full-stack app.'));
+  logger.newLine();
+  console.log(chalk.white('You\'ll need accounts with Firebase, Cloudflare, and a database provider.'));
+  console.log(chalk.white('Let\'s start with your database choice:'));
   logger.newLine();
 
   const { provider } = await inquirer.prompt([
@@ -281,7 +284,13 @@ async function checkPrerequisite(prereq: Prerequisite): Promise<{ status: 'ok' |
   }
 }
 
-export async function checkPrerequisites(): Promise<{ databasePreference?: string }> {
+interface PrerequisiteOptions {
+  autoInstall?: boolean;
+  databasePreference?: string;
+  fastMode?: boolean;
+}
+
+export async function checkPrerequisites(options: PrerequisiteOptions = {}): Promise<{ databasePreference?: string }> {
   const hasNetwork = await checkNetworkConnectivity();
   if (!hasNetwork) {
     logger.warning('No internet connection detected. Some features may not work properly.');
@@ -302,7 +311,20 @@ export async function checkPrerequisites(): Promise<{ databasePreference?: strin
   }
 
   // Check database preference for CLI validation
-  const databaseChoice = await checkDatabaseChoice();
+  let databaseChoice: string | null;
+  
+  if (options.databasePreference) {
+    // Use provided database preference
+    databaseChoice = options.databasePreference;
+    logger.info(`Using database provider: ${databaseChoice}`);
+  } else if (options.fastMode) {
+    // Default to Neon in fast mode
+    databaseChoice = 'neon';
+    logger.info('Fast mode: Using Neon as database provider');
+  } else {
+    // Ask user for preference
+    databaseChoice = await checkDatabaseChoice();
+  }
   
   // Build prerequisites list
   const prerequisites = [...corePrerequisites];
@@ -358,31 +380,47 @@ export async function checkPrerequisites(): Promise<{ databasePreference?: strin
         console.log('');
       }
       
-      const { shouldInstallLocally } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'shouldInstallLocally',
-          message: 'Would you like to install these tools locally? (Recommended)',
-          default: true
-        }
-      ]);
+      let shouldInstallLocally = options.autoInstall || false;
+      
+      if (!options.autoInstall) {
+        const response = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'shouldInstallLocally',
+            message: 'Install missing tools automatically? (Recommended)',
+            default: true
+          }
+        ]);
+        shouldInstallLocally = response.shouldInstallLocally;
+      }
       
       if (shouldInstallLocally) {
         logger.newLine();
-        logger.info('Installing CLI tools locally...');
+        logger.info('Installing CLI tools...');
         logger.newLine();
+        
+        const failedInstalls: Prerequisite[] = [];
         
         for (const prereq of canInstallLocally) {
           const success = await installCliTool(prereq);
           if (!success) {
-            logger.warning(`Failed to install ${prereq.name}. You may need to install it manually.`);
-            needManualInstall.push(prereq);
+            failedInstalls.push(prereq);
           }
         }
         
-        logger.newLine();
-        logger.success('Local CLI installation completed!');
+        if (failedInstalls.length === 0) {
+          logger.newLine();
+          logger.success('All CLI tools installed locally! ✨');
+        } else {
+          logger.newLine();
+          logger.warning(`Some tools couldn't be installed automatically:`);
+          for (const prereq of failedInstalls) {
+            console.log(chalk.yellow(`  • ${prereq.name}`));
+          }
+          needManualInstall.push(...failedInstalls);
+        }
       } else {
+        logger.info('Skipping automatic installation.');
         needManualInstall.push(...canInstallLocally);
       }
     }

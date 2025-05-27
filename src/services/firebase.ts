@@ -13,7 +13,7 @@ interface FirebaseConfig {
   measurementId: string;
 }
 
-export async function setupFirebase(): Promise<FirebaseConfig> {
+export async function setupFirebase(fastMode = false, projectName?: string): Promise<FirebaseConfig> {
   logger.newLine();
   console.log(chalk.yellow.bold('🔐 Setting up Firebase Authentication'));
   console.log(chalk.white('Firebase handles secure user login/signup for your app.'));
@@ -26,29 +26,36 @@ export async function setupFirebase(): Promise<FirebaseConfig> {
     await loginToFirebase();
   }
 
-  // Choose between creating new project or using existing
-  const { action } = await inquirer.prompt([
-    {
-      type: 'list',
-      name: 'action',
-      message: 'Would you like to create a new Firebase project or use an existing one?',
-      choices: [
-        { name: 'Create a new Firebase project', value: 'create' },
-        { name: 'Use an existing Firebase project', value: 'existing' }
-      ]
-    }
-  ]);
-
   let projectId: string;
 
-  if (action === 'create') {
-    projectId = await createFirebaseProject();
+  if (fastMode) {
+    // In fast mode, always create a new project with project name
+    projectId = await createFirebaseProjectFast(projectName || 'volo-app');
   } else {
-    projectId = await selectExistingProject();
+    // Choose between creating new project or using existing
+    const { action } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'action',
+        message: 'Would you like to create a new Firebase project or use an existing one?',
+        choices: [
+          { name: 'Create a new Firebase project', value: 'create' },
+          { name: 'Use an existing Firebase project', value: 'existing' }
+        ]
+      }
+    ]);
+
+    if (action === 'create') {
+      projectId = await createFirebaseProject();
+    } else {
+      projectId = await selectExistingProject();
+    }
   }
 
-  // Set up authentication
-  await setupFirebaseAuth(projectId);
+  // Set up authentication (skip Google Sign-In in fast mode)
+  if (!fastMode) {
+    await setupFirebaseAuth(projectId);
+  }
 
   // Create and configure web app
   const webAppConfig = await createWebApp(projectId);
@@ -96,6 +103,41 @@ async function loginToFirebase(): Promise<void> {
     spinner.fail('Firebase login failed');
     throw new Error('Failed to log in to Firebase');
   }
+}
+
+async function createFirebaseProjectFast(baseProjectName: string): Promise<string> {
+  // Sanitize project name for Firebase (lowercase, hyphens only)
+  const sanitizedName = baseProjectName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/--+/g, '-').replace(/^-|-$/g, '');
+  let projectId = sanitizedName;
+  let displayName = baseProjectName;
+  let attempt = 0;
+
+  while (attempt < 10) { // Limit attempts to avoid infinite loop
+    const spinner = ora(`Creating Firebase project "${projectId}"...`).start();
+
+    try {
+      await execFirebase(['projects:create', projectId, '--display-name', displayName]);
+      spinner.succeed(`Firebase project "${projectId}" created successfully`);
+      return projectId;
+    } catch (error) {
+      spinner.stop();
+      
+      // If project ID already exists, try with a number suffix
+      if (error instanceof Error && error.message.includes('already exists')) {
+        attempt++;
+        projectId = `${sanitizedName}-${attempt}`;
+        displayName = `${baseProjectName} ${attempt}`;
+        logger.debug(`Project ID "${sanitizedName}" exists, trying "${projectId}"`);
+        continue;
+      }
+      
+      // Other error, fail immediately
+      spinner.fail('Failed to create Firebase project');
+      throw new Error(`Failed to create Firebase project: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  
+  throw new Error('Failed to create Firebase project after multiple attempts');
 }
 
 async function createFirebaseProject(): Promise<string> {

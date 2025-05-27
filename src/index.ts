@@ -18,7 +18,10 @@ export async function main() {
     .version('1.0.0')
     .argument('[project-name]', 'Name of the project to create')
     .option('-t, --template <url>', 'Custom template repository URL', DEFAULT_TEMPLATE)
+    .option('--db <provider>', 'Database provider (neon, supabase, other)')
+    .option('--fast', 'Fast mode: use smart defaults and minimal prompts')
     .option('--skip-prereqs', 'Skip prerequisite checks (advanced users only)')
+    .option('--install-deps', 'Automatically install missing dependencies without prompting')
     .option('--verbose', 'Enable verbose logging')
     .action(async (projectName: string | undefined, options) => {
       try {
@@ -27,17 +30,21 @@ export async function main() {
         console.log(chalk.cyan.bold('🚀 Welcome to create-volo-app!'));
         console.log('');
 
-        // Check prerequisites unless skipped
+        // Check prerequisites unless skipped or in fast mode
         let databasePreference: string | undefined;
-        if (!options.skipPrereqs) {
-          const prereqResult = await checkPrerequisites();
+        if (!options.skipPrereqs && !options.fast) {
+          const prereqResult = await checkPrerequisites({
+            autoInstall: options.installDeps,
+            databasePreference: options.db,
+            fastMode: options.fast
+          });
           databasePreference = prereqResult.databasePreference;
         }
 
         // Create the app
         await createApp(projectName, { 
           ...options, 
-          databasePreference 
+          databasePreference: options.db || databasePreference 
         });
 
       } catch (error) {

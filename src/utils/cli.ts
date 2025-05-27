@@ -35,7 +35,31 @@ export async function execCli(
       return await execa('npx', [command, ...args], defaultOptions);
     } catch (localError) {
       logger.debug(`Local ${command} via npx also failed`);
-      throw new Error(`Failed to execute ${command}: ${localError instanceof Error ? localError.message : String(localError)}`);
+      
+      // Enhanced error handling to capture stderr
+      let errorMessage = `Failed to execute ${command}`;
+      if (localError instanceof Error) {
+        errorMessage += `: ${localError.message}`;
+        
+        // If it's an execa error, it might have stdout/stderr
+        if ('stderr' in localError && localError.stderr) {
+          errorMessage += `\nStderr: ${localError.stderr}`;
+        }
+        if ('stdout' in localError && localError.stdout) {
+          errorMessage += `\nStdout: ${localError.stdout}`;
+        }
+      }
+      
+      const enhancedError = new Error(errorMessage);
+      // Preserve original error properties
+      if (localError instanceof Error && 'stderr' in localError) {
+        (enhancedError as any).stderr = localError.stderr;
+      }
+      if (localError instanceof Error && 'stdout' in localError) {
+        (enhancedError as any).stdout = localError.stdout;
+      }
+      
+      throw enhancedError;
     }
   }
 }
