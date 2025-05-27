@@ -25,7 +25,6 @@ export async function main() {
         logger.setVerbose(options.verbose);
 
         console.log(chalk.cyan.bold('🚀 Welcome to create-volo-app!'));
-        console.log(chalk.gray('Creating a production-ready full-stack app with React, Hono, Firebase Auth, Neon DB, and Cloudflare deployment.'));
         console.log('');
 
         // Check prerequisites unless skipped

@@ -14,11 +14,10 @@ interface FirebaseConfig {
 }
 
 export async function setupFirebase(): Promise<FirebaseConfig> {
-  logger.step('Setting up Firebase Authentication...');
   logger.newLine();
-
-  console.log(chalk.gray('Firebase provides authentication, hosting, and other backend services.'));
-  console.log(chalk.gray('We\'ll help you create a project and configure Google Sign-In.'));
+  console.log(chalk.yellow.bold('🔐 Setting up Firebase Authentication'));
+  console.log(chalk.white('Firebase handles secure user login/signup for your app.'));
+  console.log(chalk.white('This includes Google Sign-In, password reset, and user management.'));
   logger.newLine();
 
   // Check if user is logged into Firebase
@@ -70,7 +69,10 @@ async function checkFirebaseAuth(): Promise<boolean> {
 }
 
 async function loginToFirebase(): Promise<void> {
-  logger.info('You need to log in to Firebase first.');
+  console.log(chalk.yellow.bold('🔐 Firebase Login Required'));
+  console.log(chalk.white('We need to connect to your Google account to manage Firebase projects.'));
+  console.log(chalk.white('This is secure and only takes 30 seconds.'));
+  logger.newLine();
   
   const { proceed } = await inquirer.prompt([
     {

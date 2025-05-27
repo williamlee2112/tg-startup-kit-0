@@ -14,7 +14,11 @@ export function validateTemplateUrl(url: string): boolean {
   }
 }
 
-export async function cloneTemplate(templateUrl: string, targetDirectory: string): Promise<void> {
+export async function cloneTemplate(
+  templateUrl: string, 
+  targetDirectory: string,
+  onProgress?: (progress: number, message?: string) => void
+): Promise<void> {
   logger.debug(`Cloning template from ${templateUrl} to ${targetDirectory}`);
   
   // Validate template URL for security
@@ -22,14 +26,20 @@ export async function cloneTemplate(templateUrl: string, targetDirectory: string
     throw new Error(`Invalid or untrusted template URL: ${templateUrl}. Only GitHub, GitLab, and Bitbucket repositories are allowed.`);
   }
   
+  onProgress?.(10, 'Preparing to clone template');
+  
   // Ensure parent directory exists
   await fs.ensureDir(path.dirname(targetDirectory));
   
   try {
+    onProgress?.(20, 'Cloning repository');
+    
     // Clone the repository
     await execGit(['clone', templateUrl, targetDirectory], {
       stdio: 'pipe'
     });
+    
+    onProgress?.(50, 'Validating template structure');
     
     // Validate template structure after cloning
     const isValidTemplate = await validateTemplate(targetDirectory);
@@ -37,8 +47,12 @@ export async function cloneTemplate(templateUrl: string, targetDirectory: string
       throw new Error(`Invalid template structure. The repository does not appear to be a valid Volo app template.`);
     }
     
+    onProgress?.(70, 'Preparing template files');
+    
     // Replace README.md with README.template.md for CLI users
     await replaceReadmeForCli(targetDirectory);
+    
+    onProgress?.(80, 'Cleaning up git history');
     
     // Remove .git directory to start fresh
     const gitDir = path.join(targetDirectory, '.git');
@@ -47,6 +61,8 @@ export async function cloneTemplate(templateUrl: string, targetDirectory: string
       logger.debug('Removed .git directory from template');
     }
     
+    onProgress?.(90, 'Initializing new repository');
+    
     // Initialize new git repository
     await execGit(['init'], { cwd: targetDirectory, stdio: 'pipe' });
     await execGit(['add', '.'], { cwd: targetDirectory, stdio: 'pipe' });
@@ -54,6 +70,8 @@ export async function cloneTemplate(templateUrl: string, targetDirectory: string
       cwd: targetDirectory, 
       stdio: 'pipe' 
     });
+    
+    onProgress?.(100, 'Template ready');
     
     logger.debug('Initialized new git repository');
     

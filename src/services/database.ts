@@ -18,11 +18,10 @@ interface NeonProject {
 }
 
 export async function setupDatabase(databasePreference?: string): Promise<DatabaseConfig> {
-  logger.step('Setting up PostgreSQL Database...');
   logger.newLine();
-
-  console.log(chalk.gray('Your app needs a PostgreSQL database for storing application data.'));
-  console.log(chalk.gray('Note: Firebase Authentication is always used for user auth - this is just for your database.'));
+  console.log(chalk.yellow.bold('🗄️  Setting up PostgreSQL Database'));
+  console.log(chalk.white('Your app needs a database to store application data (posts, user profiles, etc).'));
+  console.log(chalk.white('Note: This is separate from Firebase Auth - Firebase handles login, database stores your app data.'));
   logger.newLine();
 
   let provider: string;
@@ -102,8 +101,9 @@ async function authenticateNeonCLI(): Promise<boolean> {
     // Not authenticated
   }
 
-  console.log(chalk.yellow('🔐 Neon CLI authentication required'));
-  console.log(chalk.gray('We need to authenticate with Neon to manage your projects programmatically.'));
+  console.log(chalk.yellow.bold('🔐 Neon Authentication Required'));
+  console.log(chalk.white('We need to connect to your Neon account to create/manage your database.'));
+  console.log(chalk.white('This is secure and only takes 30 seconds.'));
   logger.newLine();
 
   const { authenticate } = await inquirer.prompt([

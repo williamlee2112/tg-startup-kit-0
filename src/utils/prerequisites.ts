@@ -282,11 +282,6 @@ async function checkPrerequisite(prereq: Prerequisite): Promise<{ status: 'ok' |
 }
 
 export async function checkPrerequisites(): Promise<{ databasePreference?: string }> {
-  logger.step('Checking prerequisites...');
-  logger.newLine();
-
-  // Check network connectivity first
-  logger.info('Checking network connectivity...');
   const hasNetwork = await checkNetworkConnectivity();
   if (!hasNetwork) {
     logger.warning('No internet connection detected. Some features may not work properly.');
@@ -304,8 +299,6 @@ export async function checkPrerequisites(): Promise<{ databasePreference?: strin
     if (!continueOffline) {
       process.exit(1);
     }
-  } else {
-    logger.success('Network connectivity ✓');
   }
 
   // Check database preference for CLI validation

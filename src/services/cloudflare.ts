@@ -19,7 +19,10 @@ async function checkWranglerAuth(): Promise<boolean> {
 }
 
 async function authenticateWrangler(): Promise<boolean> {
-  logger.info('Cloudflare authentication required for deployment.');
+  console.log(chalk.yellow.bold('🔐 Cloudflare Authentication Required'));
+  console.log(chalk.white('We need to connect to your Cloudflare account for deployment.'));
+  console.log(chalk.white('This is secure and only takes 30 seconds.'));
+  logger.newLine();
   
   const { authenticate } = await inquirer.prompt([
     {
@@ -56,22 +59,22 @@ async function authenticateWrangler(): Promise<boolean> {
 }
 
 export async function setupCloudflare(projectName: string): Promise<CloudflareConfig> {
-  logger.step('Setting up Cloudflare Workers...');
   logger.newLine();
-
-  console.log(chalk.gray('Cloudflare Workers will host your backend API at the edge for fast global performance.'));
-  console.log(chalk.gray('Your frontend will be deployed to Cloudflare Pages for optimal integration.'));
+  console.log(chalk.yellow.bold('🌐 Setting up Cloudflare Deployment'));
+  console.log(chalk.white('Cloudflare hosts your app globally for lightning-fast performance.'));
+  console.log(chalk.white('Your backend API runs on Workers, frontend on Pages - both free tiers available!'));
   logger.newLine();
 
   // Check if user is authenticated with Cloudflare
   const isAuthenticated = await checkWranglerAuth();
   if (!isAuthenticated) {
-    logger.info('To enable seamless deployment, we recommend authenticating with Cloudflare now.');
     const authSuccess = await authenticateWrangler();
     
     if (!authSuccess) {
-      logger.warning('Cloudflare authentication skipped. You can authenticate later by running:');
-      console.log(chalk.cyan('  cd server && wrangler login'));
+      logger.warning('Cloudflare authentication skipped.');
+      logger.newLine();
+      console.log(chalk.yellow.bold('⚡ You can authenticate later:'));
+      console.log(chalk.cyan('   cd server && wrangler login'));
       logger.newLine();
     }
   } else {

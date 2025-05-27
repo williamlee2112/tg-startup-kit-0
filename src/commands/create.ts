@@ -11,6 +11,7 @@ import { setupCloudflare } from '../services/cloudflare.js';
 import { generateConfigFiles } from '../utils/config.js';
 import { validateProjectName } from '../utils/validation.js';
 import { setupDatabase } from '../services/database.js';
+import { withProgress } from '../utils/progress.js';
 
 interface CreateOptions {
   template: string;
@@ -66,17 +67,26 @@ export async function createApp(projectName: string | undefined, options: Create
   logger.newLine();
 
   // Step 1: Clone template
-  const spinner = ora('Cloning template...').start();
+  const cloneSpinner = ora({
+    text: 'Cloning template...',
+    spinner: 'line'
+  }).start();
+  
   try {
     await cloneTemplate(options.template, directory);
-    spinner.succeed('Template cloned successfully');
+    cloneSpinner.succeed('Template cloned successfully');
   } catch (error) {
-    spinner.fail('Failed to clone template');
+    cloneSpinner.fail('Failed to clone template');
     throw error;
   }
 
   // Step 2: Gather configuration
-  logger.step('Setting up services...');
+  logger.newLine();
+  console.log(chalk.cyan.bold('🔧 Setting up your app services...'));
+  console.log(chalk.white('Your Volo app needs three key services to work:'));
+  console.log(chalk.white('  • Firebase - for user authentication (login/signup)'));
+  console.log(chalk.white('  • Database - for storing your app data'));
+  console.log(chalk.white('  • Cloudflare - for hosting your app globally'));
   logger.newLine();
 
   const config: ProjectConfig = {
@@ -88,23 +98,49 @@ export async function createApp(projectName: string | undefined, options: Create
   };
 
   // Step 3: Generate configuration files
-  logger.step('Generating configuration files...');
-  await generateConfigFiles(config);
-  logger.success('Configuration files generated');
+  const configSpinner = ora({
+    text: 'Generating configuration files...',
+    spinner: 'line'
+  }).start();
+  
+  try {
+    await generateConfigFiles(config);
+    configSpinner.succeed('Configuration files generated');
+  } catch (error) {
+    configSpinner.fail('Failed to generate configuration files');
+    throw error;
+  }
 
   // Step 4: Run post-setup
-  logger.step('Running post-setup tasks...');
+  const postSetupSpinner = ora({
+    text: 'Running post-setup tasks (this may take 30-60 seconds).',
+    spinner: 'line'
+  }).start();
+  
+  // Add animated dots effect for the long-running post-setup
+  let dotCount = 1;
+  const dotsInterval = setInterval(() => {
+    const dots = '.'.repeat(dotCount);
+    postSetupSpinner.text = `Running post-setup tasks (this may take 30-60 seconds)${dots}`;
+    dotCount = dotCount === 3 ? 1 : dotCount + 1;
+  }, 500);
+  
   try {
     await execa('pnpm', ['post-setup'], { 
       cwd: directory, 
       stdio: options.verbose ? 'inherit' : 'pipe' 
     });
-    logger.success('Post-setup completed');
+    clearInterval(dotsInterval);
+    postSetupSpinner.succeed('Post-setup completed successfully!');
   } catch (error) {
-    logger.warning('Post-setup encountered issues, but you can run it manually later');
-    logger.info('To complete setup manually, run:');
-    console.log(chalk.cyan(`  cd ${name}`));
-    console.log(chalk.cyan('  pnpm post-setup'));
+    clearInterval(dotsInterval);
+    postSetupSpinner.fail('Post-setup encountered issues');
+    logger.warning('You can run it manually later');
+    logger.newLine();
+    console.log(chalk.yellow.bold('⚡ Complete setup manually:'));
+    console.log(chalk.cyan(`   cd ${name}`));
+    console.log(chalk.cyan('   pnpm post-setup'));
+    logger.newLine();
     logger.debug(`Post-setup error: ${error}`);
   }
 
@@ -113,20 +149,53 @@ export async function createApp(projectName: string | undefined, options: Create
   logger.success('🎉 Your Volo app has been created successfully!');
   logger.newLine();
   
-  console.log(chalk.cyan.bold('Next steps:'));
-  console.log(`  cd ${name}`);
-  console.log(`  pnpm run dev:start`);
+  console.log(chalk.cyan.bold('🚀 What you got:'));
+  console.log(chalk.white('  • React + TypeScript + Tailwind CSS + ShadCN frontend'));
+  console.log(chalk.white('  • Hono API backend for Cloudflare Workers'));
+  console.log(chalk.white('  • Firebase Authentication (Google Sign-In)'));
+  console.log(chalk.white('  • PostgreSQL database with Drizzle ORM'));
+  console.log(chalk.white('  • Production deployment ready'));
   logger.newLine();
   
-  console.log(chalk.gray('Your app includes:'));
-  console.log(chalk.gray('  ✅ React frontend with TypeScript, Vite, and Tailwind CSS'));
-  console.log(chalk.gray('  ✅ Hono backend API ready for Cloudflare Workers'));
-  console.log(chalk.gray('  ✅ Firebase Authentication (Google Sign-In configured)'));
-  console.log(chalk.gray('  ✅ PostgreSQL database with Drizzle ORM'));
-  console.log(chalk.gray('  ✅ Production deployment configuration'));
+  console.log(chalk.green.bold('▶️  Next steps:'));
+  console.log(chalk.cyan(`   cd ${name}`));
+  console.log(chalk.cyan('   pnpm run dev:start'));
   logger.newLine();
   
-  console.log(chalk.blue('📚 Need help? Check the README.md file in your project for setup guides and deployment instructions'));
+  // Ask if user wants to start the app now
+  const { startNow } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'startNow',
+      message: 'Would you like to start the development server now?',
+      default: true
+    }
+  ]);
+
+  if (startNow) {
+    logger.newLine();
+    console.log(chalk.green('🚀 Starting your Volo app...'));
+    logger.newLine();
+    
+    try {
+      // Change to the project directory and start the dev server
+      await execa('pnpm', ['run', 'dev:start'], { 
+        cwd: directory, 
+        stdio: 'inherit' 
+      });
+    } catch (error) {
+      logger.error('Failed to start the development server');
+      logger.info('You can start it manually by running:');
+      console.log(chalk.cyan(`   cd ${name}`));
+      console.log(chalk.cyan('   pnpm run dev:start'));
+    }
+  } else {
+    console.log(chalk.blue('📚 Need help? Check the README.md in your project directory'));
+    logger.newLine();
+    console.log(chalk.gray('When you\'re ready to start developing:'));
+    console.log(chalk.cyan(`   cd ${name}`));
+    console.log(chalk.cyan('   pnpm run dev:start'));
+  }
 }
 
 async function getProjectName(provided?: string): Promise<string> {
@@ -169,10 +238,13 @@ async function setupFirebaseWithRetry(maxRetries = 2): Promise<ProjectConfig['fi
       
       if (attempt === maxRetries) {
         logger.error('Firebase setup failed after multiple attempts');
-        logger.info('You can set up Firebase manually later by:');
-        console.log(chalk.cyan('1. Creating a Firebase project at https://console.firebase.google.com'));
-        console.log(chalk.cyan('2. Enabling Google Authentication'));
-        console.log(chalk.cyan('3. Creating a web app and updating your config files'));
+        logger.newLine();
+        console.log(chalk.yellow.bold('⚡ Manual Firebase setup required:'));
+        console.log(chalk.cyan('   1. Visit https://console.firebase.google.com'));
+        console.log(chalk.cyan('   2. Create a new project'));
+        console.log(chalk.cyan('   3. Enable Google Authentication'));
+        console.log(chalk.cyan('   4. Create a web app and update your config files'));
+        logger.newLine();
         throw error;
       }
 
@@ -216,10 +288,12 @@ async function setupDatabaseWithRetry(databasePreference?: string, maxRetries = 
       
       if (attempt === maxRetries) {
         logger.error('Database setup failed after multiple attempts');
-        logger.info('You can set up your database manually later by:');
-        console.log(chalk.cyan('1. Creating a PostgreSQL database (Neon, Supabase, or other)'));
-        console.log(chalk.cyan('2. Updating the DATABASE_URL in server/.dev.vars'));
-        console.log(chalk.cyan('3. Running: cd server && pnpm run db:push'));
+        logger.newLine();
+        console.log(chalk.yellow.bold('⚡ Manual database setup required:'));
+        console.log(chalk.cyan('   1. Create a PostgreSQL database (Neon, Supabase, or other)'));
+        console.log(chalk.cyan('   2. Update DATABASE_URL in server/.dev.vars'));
+        console.log(chalk.cyan('   3. Run: cd server && pnpm run db:push'));
+        logger.newLine();
         throw error;
       }
 

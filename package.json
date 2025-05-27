@@ -1,6 +1,6 @@
 {
-  "name": "create-volo-app",
-  "version": "0.0.1",
+  "name": "create-volo-app-temp",
+  "version": "0.0.2",
   "description": "CLI tool to create a new Volo app with Firebase Auth, Postgres, and Cloudflare deployment",
   "type": "module",
   "bin": {
@@ -36,6 +36,7 @@
   },
   "dependencies": {
     "chalk": "^5.3.0",
+    "cli-progress": "^3.12.0",
     "commander": "^11.1.0",
     "dotenv": "^16.3.1",
     "execa": "^8.0.1",
@@ -49,6 +50,7 @@
     "which": "^4.0.0"
   },
   "devDependencies": {
+    "@types/cli-progress": "^3.11.5",
     "@types/fs-extra": "^11.0.4",
     "@types/inquirer": "^9.0.7",
     "@types/node": "^20.8.0",
