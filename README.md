@@ -38,8 +38,7 @@ The CLI creates a production-ready full-stack application with:
 - ✅ **Comprehensive setup**: Handles all service configuration automatically
 - ✅ **Prerequisites checking**: Validates required tools and guides installation
 - ✅ **Service integration**: Creates Firebase projects, configures databases, sets up Cloudflare
-- ✅ **Error handling**: Helpful error messages and recovery suggestions
-- ✅ **Educational**: Explains each step and provides learning resources
+
 
 ## Requirements
 
