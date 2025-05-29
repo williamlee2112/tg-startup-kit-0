@@ -17,6 +17,7 @@ import { execNeonctl } from '../utils/neonctl.js';
 
 interface CreateOptions {
   template: string;
+  branch?: string;
   db?: string;
   fast?: boolean;
   skipPrereqs: boolean;
@@ -188,7 +189,7 @@ export async function createApp(projectName: string | undefined, options: Create
   }).start();
   
   try {
-    await cloneTemplate(options.template, directory);
+    await cloneTemplate(options.template, directory, options.branch);
     cloneSpinner.succeed('Template cloned successfully');
   } catch (error) {
     cloneSpinner.fail('Failed to clone template');
@@ -204,8 +205,8 @@ export async function createApp(projectName: string | undefined, options: Create
   if (options.fast) {
     console.log(chalk.cyan.bold('🚀 Fast Mode: Setting up your app with smart defaults...'));
     console.log(chalk.white('Your volo-app will be configured with:'));
-    console.log(chalk.white('  • Firebase - new project with auto-generated name'));
     console.log(chalk.white(`  • Database - ${databaseProvider || 'Neon'} (new database)`));
+    console.log(chalk.white('  • Firebase - new project with auto-generated name'));
     console.log(chalk.white('  • Cloudflare - new worker with auto-generated name'));
     logger.newLine();
     console.log(chalk.gray('Note: Google Sign-In will be skipped but can be set up later in Firebase Console.'));
@@ -213,8 +214,8 @@ export async function createApp(projectName: string | undefined, options: Create
   } else {
     console.log(chalk.cyan.bold('🔧 Setting up your app services...'));
     console.log(chalk.white('Your volo-app needs three key services to work:'));
-    console.log(chalk.white('  • Firebase - for user authentication (login/signup)'));
     console.log(chalk.white('  • Database - for storing your app data'));
+    console.log(chalk.white('  • Firebase - for user authentication (login/signup)'));
     console.log(chalk.white('  • Cloudflare - for hosting your app globally'));
     logger.newLine();
   }
@@ -226,8 +227,10 @@ export async function createApp(projectName: string | undefined, options: Create
   const config: ProjectConfig = {
     name,
     directory,
-    firebase: await setupFirebaseWithRetry(undefined, options.fast, name),
+    // Database setup first
     database: await setupDatabaseWithRetry(databaseProvider, undefined, options.fast, name),
+    // Firebase setup after database
+    firebase: await setupFirebaseWithRetry(undefined, options.fast, name),
     cloudflare: await setupCloudflare(name, options.fast)
   };
 

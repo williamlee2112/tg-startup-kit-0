@@ -290,7 +290,7 @@ interface PrerequisiteOptions {
   fastMode?: boolean;
 }
 
-export async function checkPrerequisites(options: PrerequisiteOptions = {}): Promise<{ databasePreference?: string }> {
+export async function checkPrerequisites(options: PrerequisiteOptions = {}): Promise<{ databasePreference?: string; databaseConfig?: any }> {
   const hasNetwork = await checkNetworkConnectivity();
   if (!hasNetwork) {
     logger.warning('No internet connection detected. Some features may not work properly.');
@@ -487,5 +487,5 @@ export async function checkPrerequisites(options: PrerequisiteOptions = {}): Pro
   logger.success('Prerequisites check completed!');
   logger.newLine();
 
-  return { databasePreference: databaseChoice || undefined };
+  return { databasePreference: databaseChoice || undefined, databaseConfig: undefined };
 } 

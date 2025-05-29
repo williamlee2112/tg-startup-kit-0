@@ -18,6 +18,12 @@ interface SupabaseProject {
   created_at: string;
 }
 
+interface ProjectWithPassword extends SupabaseProject {
+  dbPassword?: string;
+}
+
+// === CLI HELPERS ===
+
 async function checkSupabaseCLI(): Promise<boolean> {
   try {
     await execSupabase(['--version'], { stdio: 'pipe' });
@@ -100,29 +106,25 @@ async function getDefaultOrgId(): Promise<string | null> {
   }
 }
 
-async function createSupabaseProject(baseName: string, orgId?: string, dbPassword?: string): Promise<SupabaseProject | null> {
+// === PROJECT MANAGEMENT ===
+
+function generateSecurePassword(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+  return Array.from({ length: 16 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+async function createSupabaseProject(baseName: string): Promise<ProjectWithPassword | null> {
+  const orgId = await getDefaultOrgId();
+  if (!orgId) {
+    logger.warning('Could not determine organization ID for project creation');
+    return null;
+  }
+
+  const dbPassword = generateSecurePassword();
   let projectName = baseName;
   let attempt = 0;
 
-  // Get organization ID if not provided
-  if (!orgId) {
-    const defaultOrgId = await getDefaultOrgId();
-    if (!defaultOrgId) {
-      logger.warning('Could not determine organization ID for project creation');
-      return null;
-    }
-    orgId = defaultOrgId;
-  }
-
-  // Generate a secure database password if not provided
-  if (!dbPassword) {
-    // Generate a random password with letters, numbers, and special characters
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-    dbPassword = Array.from({ length: 16 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-    logger.debug('Generated secure database password');
-  }
-
-  while (attempt < 10) { // Limit attempts to avoid infinite loop
+  while (attempt < 10) {
     const spinner = ora(`Creating new Supabase project "${projectName}"...`).start();
     
     try {
@@ -130,42 +132,24 @@ async function createSupabaseProject(baseName: string, orgId?: string, dbPasswor
         'projects', 'create', projectName,
         '--org-id', orgId,
         '--db-password', dbPassword,
-        '--region', 'us-east-1', // Default to us-east-1, most common region
+        '--region', 'us-east-1',
         '--output', 'json'
       ];
       
       logger.debug(`Executing: supabase projects create ${projectName} --org-id ${orgId} --db-password [REDACTED] --region us-east-1 --output json`);
       const { stdout } = await execSupabase(args, { stdio: 'pipe' });
-      logger.debug(`Supabase CLI stdout: ${stdout}`);
       
-      const project = JSON.parse(stdout);
+      const project = JSON.parse(stdout) as SupabaseProject;
       spinner.succeed(`Project "${projectName}" created successfully!`);
       
-      // Store the password for later use
-      (project as any).dbPassword = dbPassword;
-      
-      return project;
+      return { ...project, dbPassword };
     } catch (error) {
       spinner.stop();
       
-      // Enhanced error logging
-      logger.debug(`Supabase CLI command failed: supabase projects create ${projectName} --org-id ${orgId} --db-password [REDACTED] --region us-east-1 --output json`);
-      
-      if (error instanceof Error) {
-        logger.debug(`Error message: ${error.message}`);
-        // Try to extract stderr if available
-        if ('stderr' in error && typeof error.stderr === 'string') {
-          logger.debug(`Error stderr: ${error.stderr}`);
-        }
-        if ('stdout' in error && typeof error.stdout === 'string') {
-          logger.debug(`Error stdout: ${error.stdout}`);
-        }
-      } else {
-        logger.debug(`Error object: ${JSON.stringify(error, null, 2)}`);
-      }
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.debug(`Project creation failed: ${errorMessage}`);
       
       // Check if it's a name conflict error
-      const errorMessage = error instanceof Error ? error.message : String(error);
       if (errorMessage.includes('already exists') || errorMessage.includes('name is taken') || errorMessage.includes('duplicate')) {
         attempt++;
         projectName = `${baseName}-${attempt}`;
@@ -184,29 +168,36 @@ async function createSupabaseProject(baseName: string, orgId?: string, dbPasswor
   return null;
 }
 
-async function getSupabaseConnectionString(projectRef: string): Promise<string | null> {
+async function getProjectDetails(projectId: string): Promise<SupabaseProject | null> {
   try {
-    // Modern Supabase CLI approach: use the db command to get connection info
-    const { stdout } = await execSupabase(['projects', 'get', projectRef, '--output', 'json'], { stdio: 'pipe' });
-    const project = JSON.parse(stdout);
-    
-    if (!project) {
-      logger.debug('Project not found');
-      return null;
-    }
-
-    // Try to get the database URL directly from the project info
-    // Supabase projects have a standard connection string format
-    const connectionString = `postgresql://postgres:[YOUR-PASSWORD]@db.${projectRef}.supabase.co:5432/postgres`;
-    
-    return connectionString;
+    const { stdout } = await execSupabase(['projects', 'get', projectId, '--output', 'json'], { stdio: 'pipe' });
+    return JSON.parse(stdout);
   } catch (error) {
-    logger.debug(`Failed to get connection string: ${error}`);
+    logger.debug(`Failed to get project details: ${error}`);
     return null;
   }
 }
 
-async function promptForSupabasePassword(projectRef: string, fastMode = false): Promise<string> {
+// === CONNECTION STRING HELPERS ===
+
+function getProjectRegion(project: SupabaseProject): string {
+  const regionMap: Record<string, string> = {
+    'us-east-1': 'us-east-1',
+    'us-west-1': 'us-west-1',
+    'eu-west-1': 'eu-west-1',
+    'ap-southeast-1': 'ap-southeast-1',
+    'ap-northeast-1': 'ap-northeast-1',
+  };
+  
+  return regionMap[project.region] || 'us-east-1';
+}
+
+function createConnectionString(projectRef: string, password: string, region = 'us-east-1'): string {
+  const encodedPassword = encodeURIComponent(password);
+  return `postgresql://postgres.${projectRef}:${encodedPassword}@aws-0-${region}.pooler.supabase.com:5432/postgres`;
+}
+
+async function promptForPassword(projectRef: string, fastMode = false): Promise<string> {
   if (fastMode) {
     console.log(chalk.blue('🔑 One Quick Step: Database Password'));
     console.log(chalk.white('We need your Supabase database password to complete the setup.'));
@@ -215,6 +206,7 @@ async function promptForSupabasePassword(projectRef: string, fastMode = false): 
     console.log(chalk.blue('🔑 Database Password Required'));
     console.log(chalk.white('Supabase requires your database password to create the connection string.'));
     console.log(chalk.gray('You can find this in your Supabase dashboard under Settings > Database.'));
+    console.log(chalk.yellow('💡 We\'ll generate an IPv4 pooled connection for better platform compatibility.'));
   }
   logger.newLine();
 
@@ -231,16 +223,16 @@ async function promptForSupabasePassword(projectRef: string, fastMode = false): 
     const spinner = ora('Opening Supabase dashboard...').start();
     try {
       const url = `https://supabase.com/dashboard/project/${projectRef}/settings/database`;
-      
-      // Cross-platform browser opening
       const command = process.platform === 'win32' ? 'start' : 
                     process.platform === 'darwin' ? 'open' : 'xdg-open';
       
       await execa(command, [url], { stdio: 'ignore' });
       spinner.succeed('Supabase dashboard opened in browser');
+      console.log(chalk.gray('Look for the "Database password" field in the Connection info section.'));
     } catch (error) {
       spinner.fail('Failed to open browser');
       console.log(chalk.yellow('Please manually open: ') + chalk.cyan(`https://supabase.com/dashboard/project/${projectRef}/settings/database`));
+      console.log(chalk.gray('Look for the "Database password" field in the Connection info section.'));
     }
   }
 
@@ -261,186 +253,135 @@ async function promptForSupabasePassword(projectRef: string, fastMode = false): 
   return password;
 }
 
-export async function setupSupabaseDatabase(fastMode = false, projectName?: string): Promise<DatabaseConfig> {
-  logger.info('Setting up Supabase database...');
-  logger.newLine();
+// === PROJECT SELECTION ===
 
-  // Check if Supabase CLI is available
-  const hasSupabaseCLI = await checkSupabaseCLI();
-  if (!hasSupabaseCLI) {
-    logger.warning('Supabase CLI not found. Using manual setup instead.');
-    return await setupSupabaseDatabaseManual();
-  }
-
-  // Authenticate with Supabase
-  const isAuthenticated = await authenticateSupabaseCLI();
-  if (!isAuthenticated) {
-    logger.warning('Supabase authentication failed. Using manual setup instead.');
-    return await setupSupabaseDatabaseManual();
-  }
-
-  // List existing projects
-  const spinner = ora('Loading your Supabase projects...').start();
+async function selectOrCreateProject(fastMode: boolean, projectName?: string): Promise<{ project: SupabaseProject; password: string } | null> {
   const projects = await listSupabaseProjects();
-  spinner.stop();
+  const defaultProjectName = `${projectName || 'volo-app'}-db`;
 
-  if (projects.length === 0 || fastMode) {
+  // Fast mode or no existing projects: create new project
+  if (fastMode || projects.length === 0) {
     if (projects.length === 0) {
       console.log(chalk.yellow('No existing Supabase projects found.'));
     } else if (fastMode) {
       console.log(chalk.blue('Creating new Supabase project (fast mode)...'));
     }
     logger.newLine();
-    
-    let dbProjectName: string;
-    
-    if (fastMode) {
-      // Use project name in fast mode
-      dbProjectName = `${projectName || 'volo-app'}-db`;
-    } else {
-      const response = await inquirer.prompt([
-        {
-          type: 'input',
-          name: 'projectName',
-          message: 'Enter a name for your new Supabase project:',
-          default: `${projectName || 'volo-app'}-db`,
-          validate: (input: string) => {
-            if (!input.trim()) {
-              return 'Project name is required';
-            }
-            if (input.length > 50) {
-              return 'Project name must be 50 characters or less';
-            }
-            return true;
-          }
-        }
-      ]);
-      dbProjectName = response.projectName;
-    }
 
-    const newProject = await createSupabaseProject(dbProjectName);
+    const newProject = await createSupabaseProject(defaultProjectName);
     if (!newProject) {
-      logger.warning('Failed to create new project. Using manual setup instead.');
-      return await setupSupabaseDatabaseManual();
+      return null;
     }
-
-    // Use the generated password from project creation
-    const password = (newProject as any).dbPassword;
-    
-    const connectionString = `postgresql://postgres:${password}@db.${newProject.id}.supabase.co:5432/postgres`;
-
-    logger.success('Supabase database configured!');
-    logger.newLine();
 
     return {
-      url: connectionString,
-      provider: 'supabase'
+      project: newProject,
+      password: newProject.dbPassword!
     };
   }
 
-  // User has existing projects but not in fast mode
-  if (!fastMode) {
-    console.log(chalk.green(`Found ${projects.length} existing Supabase project(s)`));
-    logger.newLine();
+  // Interactive mode with existing projects
+  console.log(chalk.green(`Found ${projects.length} existing Supabase project(s)`));
+  logger.newLine();
 
-    const projectChoices = [
-      ...projects.map(project => ({
-        name: `${project.name} (${project.id})`,
-        value: project.id,
-        short: project.name
-      })),
-      {
-        name: '+ Create a new project',
-        value: 'new',
-        short: 'New project'
-      }
-    ];
+  const projectChoices = [
+    ...projects.map(project => ({
+      name: `${project.name} (${project.id})`,
+      value: project.id,
+      short: project.name
+    })),
+    {
+      name: '+ Create a new project',
+      value: 'new',
+      short: 'New project'
+    }
+  ];
 
-    const { selectedProject } = await inquirer.prompt([
+  const { selectedProject } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'selectedProject',
+      message: 'Which Supabase project would you like to use?',
+      choices: projectChoices
+    }
+  ]);
+
+  if (selectedProject === 'new') {
+    const { newProjectName } = await inquirer.prompt([
       {
-        type: 'list',
-        name: 'selectedProject',
-        message: 'Which Supabase project would you like to use?',
-        choices: projectChoices
+        type: 'input',
+        name: 'newProjectName',
+        message: 'Enter a name for your new Supabase project:',
+        default: defaultProjectName,
+        validate: (input: string) => {
+          if (!input.trim()) return 'Project name is required';
+          if (input.length > 50) return 'Project name must be 50 characters or less';
+          return true;
+        }
       }
     ]);
 
-    let projectRef: string;
-
-    if (selectedProject === 'new') {
-      const { dbProjectName } = await inquirer.prompt([
-        {
-          type: 'input',
-          name: 'dbProjectName',
-          message: 'Enter a name for your new Supabase project:',
-          default: `${projectName || 'volo-app'}-db`,
-          validate: (input: string) => {
-            if (!input.trim()) {
-              return 'Project name is required';
-            }
-            if (input.length > 50) {
-              return 'Project name must be 50 characters or less';
-            }
-            return true;
-          }
-        }
-      ]);
-
-      const newProject = await createSupabaseProject(dbProjectName);
-      if (!newProject) {
-        logger.warning('Failed to create new project. Using manual setup instead.');
-        return await setupSupabaseDatabaseManual();
-      }
-      projectRef = newProject.id;
-      
-      // Use the generated password for new projects
-      const password = (newProject as any).dbPassword;
-      const connectionString = `postgresql://postgres:${password}@db.${projectRef}.supabase.co:5432/postgres`;
-
-      logger.success('Supabase database configured!');
-      logger.newLine();
-
-      return {
-        url: connectionString,
-        provider: 'supabase'
-      };
-    } else {
-      projectRef = selectedProject;
-      
-      // Get the database password for existing projects
-      const password = await promptForSupabasePassword(projectRef, false);
-      const connectionString = `postgresql://postgres:${password}@db.${projectRef}.supabase.co:5432/postgres`;
-
-      logger.success('Supabase database configured!');
-      logger.newLine();
-
-             return {
-         url: connectionString,
-         provider: 'supabase'
-       };
-     }
-  } else {
-    // Fast mode: create new project even if existing ones exist
-    const dbProjectName = `${projectName || 'volo-app'}-db`;
-    
-    const newProject = await createSupabaseProject(dbProjectName);
+    const newProject = await createSupabaseProject(newProjectName);
     if (!newProject) {
-      logger.warning('Failed to create new project. Using manual setup instead.');
-      return await setupSupabaseDatabaseManual();
+      return null;
     }
 
-    // Use the generated password from project creation
-    const password = (newProject as any).dbPassword;
-    const connectionString = `postgresql://postgres:${password}@db.${newProject.id}.supabase.co:5432/postgres`;
-
-    logger.success('Supabase database configured!');
-    logger.newLine();
-
     return {
-      url: connectionString,
-      provider: 'supabase'
+      project: newProject,
+      password: newProject.dbPassword!
     };
   }
+
+  // Use existing project
+  const project = projects.find(p => p.id === selectedProject);
+  if (!project) {
+    logger.warning('Selected project not found');
+    return null;
+  }
+
+  const password = await promptForPassword(selectedProject, false);
+  return { project, password };
+}
+
+// === MAIN SETUP FUNCTIONS ===
+
+export async function setupSupabaseDatabase(fastMode = false, projectName?: string): Promise<DatabaseConfig> {
+  logger.info('Setting up Supabase database...');
+  logger.newLine();
+
+  // Check prerequisites
+  const hasSupabaseCLI = await checkSupabaseCLI();
+  if (!hasSupabaseCLI) {
+    logger.warning('Supabase CLI not found. Using manual setup instead.');
+    return await setupSupabaseDatabaseManual();
+  }
+
+  const isAuthenticated = await authenticateSupabaseCLI();
+  if (!isAuthenticated) {
+    logger.warning('Supabase authentication failed. Using manual setup instead.');
+    return await setupSupabaseDatabaseManual();
+  }
+
+  // Get or create project
+  const spinner = ora('Loading your Supabase projects...').start();
+  spinner.stop();
+
+  const result = await selectOrCreateProject(fastMode, projectName);
+  if (!result) {
+    logger.warning('Failed to set up project. Using manual setup instead.');
+    return await setupSupabaseDatabaseManual();
+  }
+
+  const { project, password } = result;
+  const region = getProjectRegion(project);
+  const connectionString = createConnectionString(project.id, password, region);
+
+  logger.success('Supabase database configured!');
+  logger.newLine();
+
+  return {
+    url: connectionString,
+    provider: 'supabase'
+  };
 }
 
 async function setupSupabaseDatabaseManual(): Promise<DatabaseConfig> {
@@ -449,8 +390,13 @@ async function setupSupabaseDatabaseManual(): Promise<DatabaseConfig> {
   console.log(chalk.gray('2. Sign up for a free account (if you don\'t have one)'));
   console.log(chalk.gray('3. Create a new project'));
   console.log(chalk.gray('4. Go to Settings > Database'));
-  console.log(chalk.gray('5. Copy the connection string (URI format)'));
-  console.log(chalk.gray('   It should look like: postgresql://postgres:[password]@[host]:5432/postgres'));
+  console.log(chalk.gray('5. Copy the POOLED connection string (IPv4) - NOT the direct connection'));
+  console.log(chalk.gray('   Look for: Session pooler > Connection string'));
+  console.log(chalk.gray('   Format: postgresql://postgres.PROJECT_REF:[password]@aws-0-[region].pooler.supabase.com:5432/postgres'));
+  logger.newLine();
+
+  console.log(chalk.blue('💡 Important: Use the pooled connection for better compatibility!'));
+  console.log(chalk.gray('   The pooled connection works on IPv4-only platforms like Vercel, GitHub Actions, etc.'));
   logger.newLine();
 
   const { hasAccount } = await inquirer.prompt([
@@ -464,7 +410,7 @@ async function setupSupabaseDatabaseManual(): Promise<DatabaseConfig> {
 
   if (!hasAccount) {
     console.log(chalk.blue('👉 Opening Supabase signup page...'));
-    console.log(chalk.gray('Please create an account and return here when you have your connection string.'));
+    console.log(chalk.gray('Please create an account and return here when you have your pooled connection string.'));
     logger.newLine();
     
     console.log(chalk.blue('Sign up at: https://supabase.com/dashboard'));
@@ -475,13 +421,16 @@ async function setupSupabaseDatabaseManual(): Promise<DatabaseConfig> {
     {
       type: 'input',
       name: 'connectionString',
-      message: 'Enter your Supabase connection string:',
+      message: 'Enter your Supabase POOLED connection string:',
       validate: (input: string) => {
         if (!input.trim()) {
           return 'Connection string is required';
         }
         if (!input.startsWith('postgresql://')) {
           return 'Connection string should start with "postgresql://"';
+        }
+        if (input.includes('db.') && input.includes('.supabase.co:5432')) {
+          return 'Please use the POOLED connection string (aws-0-region.pooler.supabase.com), not the direct connection (db.project.supabase.co)';
         }
         return true;
       }

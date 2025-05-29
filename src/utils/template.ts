@@ -17,9 +17,10 @@ export function validateTemplateUrl(url: string): boolean {
 export async function cloneTemplate(
   templateUrl: string, 
   targetDirectory: string,
+  branch?: string,
   onProgress?: (progress: number, message?: string) => void
 ): Promise<void> {
-  logger.debug(`Cloning template from ${templateUrl} to ${targetDirectory}`);
+  logger.debug(`Cloning template from ${templateUrl} to ${targetDirectory}${branch ? ` (branch: ${branch})` : ''}`);
   
   // Validate template URL for security
   if (!validateTemplateUrl(templateUrl)) {
@@ -34,8 +35,14 @@ export async function cloneTemplate(
   try {
     onProgress?.(20, 'Cloning repository');
     
-    // Clone the repository
-    await execGit(['clone', templateUrl, targetDirectory], {
+    // Clone the repository with optional branch specification
+    const cloneArgs = ['clone'];
+    if (branch) {
+      cloneArgs.push('-b', branch);
+    }
+    cloneArgs.push(templateUrl, targetDirectory);
+    
+    await execGit(cloneArgs, {
       stdio: 'pipe'
     });
     

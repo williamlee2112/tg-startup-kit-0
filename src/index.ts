@@ -18,6 +18,7 @@ export async function main() {
     .version('1.0.0')
     .argument('[project-name]', 'Name of the project to create')
     .option('-t, --template <url>', 'Custom template repository URL', DEFAULT_TEMPLATE)
+    .option('-b, --branch <branch>', 'Git branch to clone from template repository', 'main')
     .option('--db <provider>', 'Database provider (neon, supabase, other)')
     .option('--fast', 'Fast mode: use smart defaults and minimal prompts')
     .option('--skip-prereqs', 'Skip prerequisite checks (advanced users only)')
@@ -30,9 +31,9 @@ export async function main() {
         console.log(chalk.cyan.bold('🚀 Welcome to create-volo-app!'));
         console.log('');
 
-        // Check prerequisites unless skipped or in fast mode
+        // Check prerequisites unless skipped
         let databasePreference: string | undefined;
-        if (!options.skipPrereqs && !options.fast) {
+        if (!options.skipPrereqs) {
           const prereqResult = await checkPrerequisites({
             autoInstall: options.installDeps,
             databasePreference: options.db,
@@ -44,7 +45,7 @@ export async function main() {
         // Create the app
         await createApp(projectName, { 
           ...options, 
-          databasePreference: options.db || databasePreference 
+          databasePreference: options.db || databasePreference
         });
 
       } catch (error) {
