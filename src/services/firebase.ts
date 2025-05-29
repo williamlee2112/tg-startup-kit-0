@@ -23,7 +23,8 @@ export async function setupFirebase(fastMode = false, projectName?: string): Pro
   // Check if user is logged into Firebase
   const isLoggedIn = await checkFirebaseAuth();
   if (!isLoggedIn) {
-    await loginToFirebase();
+    logger.warning('Firebase authentication required. Please authenticate first.');
+    throw new Error('Firebase authentication required');
   }
 
   let projectId: string;
@@ -72,36 +73,6 @@ async function checkFirebaseAuth(): Promise<boolean> {
     return stdout.includes('@');
   } catch {
     return false;
-  }
-}
-
-async function loginToFirebase(): Promise<void> {
-  console.log(chalk.yellow.bold('🔐 Firebase Login Required'));
-  console.log(chalk.white('We need to connect to your Google account to manage Firebase projects.'));
-  console.log(chalk.white('This is secure and only takes 30 seconds.'));
-  logger.newLine();
-  
-  const { proceed } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'proceed',
-      message: 'Open Firebase login in your browser?',
-      default: true
-    }
-  ]);
-
-  if (!proceed) {
-    throw new Error('Firebase login is required to continue');
-  }
-
-  const spinner = ora('Opening Firebase login...').start();
-  
-  try {
-    await execFirebase(['login'], { stdio: 'inherit' });
-    spinner.succeed('Firebase login completed');
-  } catch (error) {
-    spinner.fail('Firebase login failed');
-    throw new Error('Failed to log in to Firebase');
   }
 }
 

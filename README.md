@@ -6,8 +6,6 @@ CLI tool to create a production-ready full-stack app with React, Firebase Auth, 
 
 ```bash
 npx create-volo-app my-app
-cd my-app
-pnpm run dev:start
 ```
 
 ## What You Get
@@ -105,6 +103,17 @@ pnpm install
 pnpm run build
 node bin/cli.js test-app
 ```
+
+## Roadmap
+- Make Auth provider modular; support Supabase and Clerk
+- Make deployment target more modular (support Docker, different backend TS runtimes like Bun)
+- Create UI on top of the CLI for more intuitive project config
+- Build optional "commit to git" support to push created volo-app to Git
+- Build optional auto-deploy process (git actions + any platform-specific configs)
+
+## Testing
+
+See [`/test`](./test) for testing tools and instructions.
 
 ## Support
 

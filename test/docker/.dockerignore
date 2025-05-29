@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+dist/
+
+# Test projects
+volo-sample*/
+
+# Package files
+*.tgz
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test directory (we're copying specific files we need)
+test/docker/
+
+# Docs
+README.md
+LICENSE 

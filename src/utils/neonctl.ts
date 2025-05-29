@@ -19,50 +19,6 @@ interface ExecResult {
 }
 
 /**
- * Check if neonctl is globally installed
- */
-async function isNeonctlGloballyInstalled(): Promise<boolean> {
-  try {
-    // Run from package root to ensure we have a package.json context
-    await execAsync('neonctl --version', { timeout: 5000, cwd: packageRoot });
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
-/**
- * Install neonctl globally
- */
-async function installNeonctlGlobally(): Promise<boolean> {
-  try {
-    logger.info('Installing neonctl globally...');
-    // Run from package root to ensure we have a package.json context
-    await execAsync('npm install -g neonctl', { timeout: 60000, cwd: packageRoot });
-    logger.success('neonctl installed globally!');
-    return true;
-  } catch (error) {
-    logger.error(`Failed to install neonctl globally: ${error}`);
-    return false;
-  }
-}
-
-/**
- * Ensure neonctl is available globally
- */
-async function ensureNeonctlAvailable(): Promise<boolean> {
-  logger.debug('Checking if neonctl is globally available...');
-  
-  if (await isNeonctlGloballyInstalled()) {
-    logger.debug('neonctl is already globally installed');
-    return true;
-  }
-  
-  logger.debug('neonctl not found globally, attempting to install...');
-  return await installNeonctlGlobally();
-}
-
-/**
  * Get a working directory that has a package.json file
  * This prevents neonctl from hanging when no package.json is present
  */
@@ -92,30 +48,25 @@ async function getWorkingDirectoryWithPackageJson(): Promise<string> {
 }
 
 /**
- * Execute neonctl command with the given arguments using the global neonctl
+ * Execute neonctl command with the given arguments
+ * Assumes neonctl is already installed (handled by prerequisites check)
  * @param args Command arguments to pass to neonctl
  * @param options Execution options
  */
 export async function execNeonctl(args: string[], options: { stdio?: 'pipe' | 'inherit'; timeout?: number } = {}): Promise<ExecResult> {
   const timeout = options.timeout || 30000; // 30 second default timeout
   
-  // Ensure neonctl is available globally
-  const isAvailable = await ensureNeonctlAvailable();
-  if (!isAvailable) {
-    throw new Error('neonctl is not available and could not be installed globally');
-  }
-  
   // Get a working directory with package.json to prevent hanging
   const workingDir = await getWorkingDirectoryWithPackageJson();
   
-  logger.debug(`Executing global neonctl with args: ${args.join(' ')} from directory: ${workingDir}`);
+  logger.debug(`Executing neonctl with args: ${args.join(' ')} from directory: ${workingDir}`);
   
   return new Promise((resolve, reject) => {
-    // Use spawn directly with the global neonctl command
+    // Use spawn with neonctl command (could be global or local via npx)
     const child = spawn('neonctl', args, {
       stdio: options.stdio === 'pipe' ? ['pipe', 'pipe', 'pipe'] : 'inherit',
       shell: true,
-      cwd: workingDir, // Run from directory with package.json
+      cwd: workingDir,
       env: {
         ...process.env,
       }

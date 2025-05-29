@@ -18,46 +18,6 @@ async function checkWranglerAuth(): Promise<boolean> {
   }
 }
 
-async function authenticateWrangler(): Promise<boolean> {
-  console.log(chalk.yellow.bold('🔐 Cloudflare Authentication Required'));
-  console.log(chalk.white('We need to connect to your Cloudflare account for deployment.'));
-  console.log(chalk.white('This is secure and only takes 30 seconds.'));
-  logger.newLine();
-  
-  const { authenticate } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'authenticate',
-      message: 'Would you like to authenticate with Cloudflare now? (This will open your browser)',
-      default: true
-    }
-  ]);
-
-  if (!authenticate) {
-    return false;
-  }
-
-  const spinner = ora('Opening browser for Cloudflare authentication...').start();
-  
-  try {
-    await execWrangler(['login'], { stdio: 'inherit' });
-    
-    // Verify authentication worked
-    const isAuthenticated = await checkWranglerAuth();
-    if (isAuthenticated) {
-      spinner.succeed('Successfully authenticated with Cloudflare!');
-      return true;
-    } else {
-      spinner.fail('Authentication verification failed');
-      return false;
-    }
-  } catch (error) {
-    spinner.fail('Authentication failed or was cancelled');
-    logger.debug(`Wrangler auth error: ${error}`);
-    return false;
-  }
-}
-
 export async function setupCloudflare(projectName: string, fastMode = false): Promise<CloudflareConfig> {
   logger.newLine();
   console.log(chalk.yellow.bold('🌐 Setting up Cloudflare Deployment'));
@@ -68,15 +28,11 @@ export async function setupCloudflare(projectName: string, fastMode = false): Pr
   // Check if user is authenticated with Cloudflare
   const isAuthenticated = await checkWranglerAuth();
   if (!isAuthenticated) {
-    const authSuccess = await authenticateWrangler();
-    
-    if (!authSuccess) {
-      logger.warning('Cloudflare authentication skipped.');
-      logger.newLine();
-      console.log(chalk.yellow.bold('⚡ You can authenticate later:'));
-      console.log(chalk.cyan('   cd server && wrangler login'));
-      logger.newLine();
-    }
+    logger.warning('Cloudflare authentication skipped.');
+    logger.newLine();
+    console.log(chalk.yellow.bold('⚡ You can authenticate later:'));
+    console.log(chalk.cyan('   cd server && wrangler login'));
+    logger.newLine();
   } else {
     logger.success('Already authenticated with Cloudflare ✓');
   }

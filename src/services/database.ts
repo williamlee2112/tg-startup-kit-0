@@ -94,45 +94,12 @@ async function checkNeonCLI(): Promise<boolean> {
   }
 }
 
-async function authenticateNeonCLI(): Promise<boolean> {
+async function isNeonAuthenticated(): Promise<boolean> {
   try {
     // Check if already authenticated
     const { stdout } = await execNeonctl(['me'], { stdio: 'pipe' });
-    if (stdout.includes('@')) {
-      return true;
-    }
+    return stdout.includes('@');
   } catch (error) {
-    // Not authenticated
-  }
-
-  console.log(chalk.yellow.bold('🔐 Neon Authentication Required'));
-  console.log(chalk.white('We need to connect to your Neon account to create/manage your database.'));
-  console.log(chalk.white('This is secure and only takes 30 seconds.'));
-  logger.newLine();
-
-  const { authenticate } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'authenticate',
-      message: 'Would you like to authenticate with Neon now? (This will open your browser)',
-      default: true
-    }
-  ]);
-
-  if (!authenticate) {
-    return false;
-  }
-
-  try {
-    console.log(chalk.blue('Opening browser for Neon authentication...'));
-    await execNeonctl(['auth'], { stdio: 'inherit' });
-    
-    // Verify authentication worked
-    await execNeonctl(['me'], { stdio: 'pipe' });
-    logger.success('Successfully authenticated with Neon!');
-    return true;
-  } catch (error) {
-    logger.warning('Authentication failed or was cancelled');
     return false;
   }
 }
@@ -231,7 +198,7 @@ async function setupNeonDatabase(fastMode = false, projectName?: string): Promis
   logger.newLine();
 
   // Authenticate with Neon
-  const isAuthenticated = await authenticateNeonCLI();
+  const isAuthenticated = await isNeonAuthenticated();
   if (!isAuthenticated) {
     logger.warning('Neon authentication failed. Using manual setup instead.');
     return await setupNeonDatabaseManual();

@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { createApp } from './commands/create.js';
-import { checkPrerequisites } from './utils/prerequisites.js';
+import { checkPrerequisites } from './utils/prerequisites/checkPrereqs.js';
 import { logger } from './utils/logger.js';
 
 const program = new Command();

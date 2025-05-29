@@ -47,6 +47,7 @@ interface ProjectConfig {
 interface AuthStatus {
   firebase: boolean;
   neon: boolean;
+  supabase: boolean;
   cloudflare: boolean;
 }
 
@@ -54,6 +55,7 @@ async function checkAuthenticationStatus(databaseProvider?: string): Promise<Aut
   const status: AuthStatus = {
     firebase: false,
     neon: false,
+    supabase: false,
     cloudflare: false
   };
 
@@ -77,6 +79,19 @@ async function checkAuthenticationStatus(databaseProvider?: string): Promise<Aut
     status.neon = true; // Not needed for other providers
   }
 
+  // Check Supabase auth (only if using Supabase)
+  if (databaseProvider === 'supabase') {
+    try {
+      const { execSupabase } = await import('../utils/cli.js');
+      const { stdout } = await execSupabase(['projects', 'list'], { stdio: 'pipe' });
+      status.supabase = stdout.includes('ID') || stdout.includes('Name');
+    } catch {
+      status.supabase = false;
+    }
+  } else {
+    status.supabase = true; // Not needed for other providers
+  }
+
   // Check Cloudflare auth
   try {
     const { execa } = await import('execa');
@@ -94,6 +109,7 @@ async function handleBatchAuthentication(authStatus: AuthStatus, databaseProvide
   
   if (!authStatus.firebase) needsAuth.push('Firebase');
   if (!authStatus.neon && databaseProvider === 'neon') needsAuth.push('Neon');
+  if (!authStatus.supabase && databaseProvider === 'supabase') needsAuth.push('Supabase');
   if (!authStatus.cloudflare) needsAuth.push('Cloudflare');
 
   if (needsAuth.length === 0) {
@@ -138,6 +154,10 @@ async function handleBatchAuthentication(authStatus: AuthStatus, databaseProvide
           break;
         case 'Neon':
           await execNeonctl(['auth'], { stdio: 'inherit' });
+          break;
+        case 'Supabase':
+          const { execSupabase } = await import('../utils/cli.js');
+          await execSupabase(['login'], { stdio: 'inherit' });
           break;
         case 'Cloudflare':
           const { execa } = await import('execa');

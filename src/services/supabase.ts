@@ -33,42 +33,12 @@ async function checkSupabaseCLI(): Promise<boolean> {
   }
 }
 
-async function authenticateSupabaseCLI(): Promise<boolean> {
+async function isSupabaseAuthenticated(): Promise<boolean> {
   try {
     // Check if already authenticated by trying to list projects
     const { stdout } = await execSupabase(['projects', 'list'], { stdio: 'pipe' });
     return stdout.includes('ID') || stdout.includes('Name'); // Basic check for project list output
   } catch (error) {
-    // Not authenticated
-  }
-
-  console.log(chalk.yellow('🔐 Supabase CLI authentication required'));
-  console.log(chalk.gray('We need to authenticate with Supabase to manage your projects programmatically.'));
-  logger.newLine();
-
-  const { authenticate } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'authenticate',
-      message: 'Would you like to authenticate with Supabase now? (This will open your browser)',
-      default: true
-    }
-  ]);
-
-  if (!authenticate) {
-    return false;
-  }
-
-  try {
-    console.log(chalk.blue('Opening browser for Supabase authentication...'));
-    await execSupabase(['login'], { stdio: 'inherit' });
-    
-    // Verify authentication worked
-    await execSupabase(['projects', 'list'], { stdio: 'pipe' });
-    logger.success('Successfully authenticated with Supabase!');
-    return true;
-  } catch (error) {
-    logger.warning('Authentication failed or was cancelled');
     return false;
   }
 }
@@ -355,7 +325,7 @@ export async function setupSupabaseDatabase(fastMode = false, projectName?: stri
     return await setupSupabaseDatabaseManual();
   }
 
-  const isAuthenticated = await authenticateSupabaseCLI();
+  const isAuthenticated = await isSupabaseAuthenticated();
   if (!isAuthenticated) {
     logger.warning('Supabase authentication failed. Using manual setup instead.');
     return await setupSupabaseDatabaseManual();

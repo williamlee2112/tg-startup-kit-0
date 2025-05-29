@@ -9,6 +9,31 @@ interface CliOptions {
 }
 
 /**
+ * Configures Git user identity if not already set
+ */
+async function ensureGitIdentity(cwd?: string): Promise<void> {
+  const options = { stdio: 'pipe' as const, cwd };
+  
+  try {
+    // Check if user.name is set
+    await execa('git', ['config', 'user.name'], options);
+  } catch {
+    // Set default user.name
+    await execa('git', ['config', 'user.name', 'Volo App Creator'], options);
+    logger.debug('Set default git user.name');
+  }
+  
+  try {
+    // Check if user.email is set
+    await execa('git', ['config', 'user.email'], options);
+  } catch {
+    // Set default user.email
+    await execa('git', ['config', 'user.email', 'creator@volo-app.local'], options);
+    logger.debug('Set default git user.email');
+  }
+}
+
+/**
  * Executes a CLI command, trying global installation first, then local via npx
  */
 export async function execCli(
@@ -85,13 +110,45 @@ export async function execWrangler(
 }
 
 /**
- * Executes Git command
+ * Executes Git command - Git is a system tool, not an npm package
  */
 export async function execGit(
   args: string[],
   options: CliOptions = {}
 ): Promise<{ stdout: string; stderr: string }> {
-  return execCli('git', args, options);
+  const defaultOptions = {
+    stdio: 'pipe' as const,
+    timeout: 30000,
+    ...options
+  };
+
+  try {
+    // Git should always be available globally - it's a system tool
+    await which('git');
+    logger.debug(`Using global git`);
+    
+    // For commit commands, ensure git identity is configured
+    if (args[0] === 'commit') {
+      await ensureGitIdentity(defaultOptions.cwd);
+    }
+    
+    return await execa('git', args, defaultOptions);
+  } catch (error) {
+    logger.debug(`Git command failed: ${error}`);
+    
+    // Enhanced error message for identity issues
+    if (error instanceof Error && error.message.includes('Author identity unknown')) {
+      throw new Error('Git identity not configured. This should have been set automatically. Please check git configuration.');
+    }
+    
+    // Git is a system tool, not an npm package, so don't try npx
+    let errorMessage = 'Git is not installed or not available in PATH';
+    if (error instanceof Error) {
+      errorMessage += `: ${error.message}`;
+    }
+    
+    throw new Error(errorMessage);
+  }
 }
 
 /**
