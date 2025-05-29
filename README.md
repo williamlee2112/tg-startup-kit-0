@@ -27,7 +27,7 @@ npx create-volo-app my-app
 
 ## Requirements
 
-- Node.js 18+, pnpm 8+, Git, Firebase CLI
+- Node.js 20+, pnpm 8+, Git, Firebase CLI
 
 The CLI will check these and guide installation if needed.
 

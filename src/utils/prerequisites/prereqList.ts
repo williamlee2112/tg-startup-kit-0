@@ -5,7 +5,7 @@ export const corePrerequisites: Prerequisite[] = [
     name: 'Node.js',
     command: 'node',
     version: '--version',
-    minVersion: '18.0.0',
+    minVersion: '20.0.0',
     installUrl: 'https://nodejs.org/',
     description: 'JavaScript runtime required for the CLI and development',
     checkVersion: (output) => output.replace('v', '').trim(),

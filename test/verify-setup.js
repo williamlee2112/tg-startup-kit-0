@@ -9,7 +9,7 @@ const { spawn } = require('child_process');
 const chalk = require('chalk');
 
 const coreTools = [
-  { name: 'Node.js', command: 'node', args: ['--version'], minVersion: '18.0.0' },
+  { name: 'Node.js', command: 'node', args: ['--version'], minVersion: '20.0.0' },
   { name: 'Git', command: 'git', args: ['--version'] },
   { name: 'pnpm', command: 'pnpm', args: ['--version'], optional: true },
   { name: 'Firebase CLI', command: 'firebase', args: ['--version'], optional: true },
