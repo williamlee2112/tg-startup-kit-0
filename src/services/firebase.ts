@@ -5,12 +5,68 @@ import { logger } from '../utils/logger.js';
 import { validateFirebaseProjectId } from '../utils/validation.js';
 import { execFirebase } from '../utils/cli.js';
 
+// Custom error for Firebase project ID conflicts
+export class FirebaseProjectIdConflictError extends Error {
+  constructor(projectId: string) {
+    super(`Firebase project ID "${projectId}" already exists. Please choose a different one.`);
+    this.name = 'FirebaseProjectIdConflictError';
+  }
+}
+
+// Custom error for Firebase Terms of Service acceptance required
+export class FirebaseTermsOfServiceError extends Error {
+  constructor() {
+    super('Google Cloud Platform Terms of Service must be accepted before creating Firebase projects.');
+    this.name = 'FirebaseTermsOfServiceError';
+  }
+}
+
+// Custom error for first-time Firebase setup requiring manual project creation
+export class FirebaseFirstTimeSetupError extends Error {
+  constructor() {
+    super('First Firebase project must be created manually through Firebase Console.');
+    this.name = 'FirebaseFirstTimeSetupError';
+  }
+}
+
 interface FirebaseConfig {
   projectId: string;
   apiKey: string;
   messagingSenderId: string;
   appId: string;
   measurementId: string;
+}
+
+async function checkFirebaseAuth(): Promise<boolean> {
+  try {
+    const { stdout } = await execFirebase(['login:list']);
+    return stdout.includes('@');
+  } catch {
+    return false;
+  }
+}
+
+async function checkFirebaseFirstTimeSetup(): Promise<boolean> {
+  try {
+    // Try to list Firebase projects to check if user has created any before
+    const { stdout } = await execFirebase(['projects:list', '-j']);
+    const response = JSON.parse(stdout);
+    
+    // Check if user has any existing Firebase projects
+    const projects = response.result || [];
+    return projects.length === 0; // Returns true if this is first time setup
+  } catch (error) {
+    if (error instanceof Error) {
+      // Check for specific permission errors that indicate Terms of Service issues
+      if (error.message.includes('The caller does not have permission') ||
+          error.message.includes('Terms of Service') ||
+          error.message.includes('TOS')) {
+        throw new FirebaseTermsOfServiceError();
+      }
+    }
+    // For other errors, assume it's not first time setup
+    return false;
+  }
 }
 
 export async function setupFirebase(fastMode = false, projectName?: string): Promise<FirebaseConfig> {
@@ -25,6 +81,13 @@ export async function setupFirebase(fastMode = false, projectName?: string): Pro
   if (!isLoggedIn) {
     logger.warning('Firebase authentication required. Please authenticate first.');
     throw new Error('Firebase authentication required');
+  }
+
+  // Check if this is the user's first Firebase project
+  const isFirstTimeSetup = await checkFirebaseFirstTimeSetup();
+  if (isFirstTimeSetup) {
+    displayFirstTimeSetupMessage();
+    throw new FirebaseFirstTimeSetupError();
   }
 
   let projectId: string;
@@ -47,9 +110,9 @@ export async function setupFirebase(fastMode = false, projectName?: string): Pro
     ]);
 
     if (action === 'create') {
-      projectId = await createFirebaseProject();
+      projectId = await createFirebaseProject(projectName);
     } else {
-      projectId = await selectExistingProject();
+      projectId = await selectExistingProject(projectName);
     }
   }
 
@@ -65,15 +128,6 @@ export async function setupFirebase(fastMode = false, projectName?: string): Pro
   logger.newLine();
 
   return webAppConfig;
-}
-
-async function checkFirebaseAuth(): Promise<boolean> {
-  try {
-    const { stdout } = await execFirebase(['login:list']);
-    return stdout.includes('@');
-  } catch {
-    return false;
-  }
 }
 
 async function createFirebaseProjectFast(baseProjectName: string): Promise<string> {
@@ -94,7 +148,11 @@ async function createFirebaseProjectFast(baseProjectName: string): Promise<strin
       spinner.stop();
       
       // If project ID already exists, try with a number suffix
-      if (error instanceof Error && error.message.includes('already exists')) {
+      if (error instanceof Error && (
+        error.message.includes('already exists') || 
+        error.message.includes('ALREADY_EXISTS') ||
+        error.message.includes('project with ID')
+      )) {
         attempt++;
         projectId = `${sanitizedName}-${attempt}`;
         displayName = `${baseProjectName} ${attempt}`;
@@ -102,21 +160,52 @@ async function createFirebaseProjectFast(baseProjectName: string): Promise<strin
         continue;
       }
       
+      // Check if this is a Terms of Service error (fallback)
+      if (error instanceof Error && (
+        error.message.includes('Terms of Service') ||
+        error.message.includes('Callers must accept Terms of Service') ||
+        error.message.includes('TOS') ||
+        error.message.includes('Failed to create project. See firebase-debug.log') ||
+        error.message.includes('Failed to add Firebase to Google Cloud Platform project') ||
+        error.message.includes('The caller does not have permission')
+      )) {
+        displayTermsOfServiceMessage();
+        throw new FirebaseTermsOfServiceError();
+      }
+      
       // Other error, fail immediately
       spinner.fail('Failed to create Firebase project');
+      logger.newLine();
+      console.log(chalk.red('❌ Firebase project creation failed:'));
+      console.log(chalk.gray(error instanceof Error ? error.message : String(error)));
+      logger.newLine();
       throw new Error(`Failed to create Firebase project: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   
+  // If we've tried 10 variations and all failed, provide better guidance
+  logger.error(`Failed to find a unique Firebase project ID after trying 10 variations of "${sanitizedName}"`);
+  logger.newLine();
+  console.log(chalk.yellow('💡 All variations of your project name are taken. Consider:'));
+  console.log(chalk.white(`   • Using a more unique project name`));
+  console.log(chalk.white(`   • Adding your initials or organization name`));
+  console.log(chalk.white(`   • Adding the current year or date`));
+  logger.newLine();
   throw new Error('Failed to create Firebase project after multiple attempts');
 }
 
-async function createFirebaseProject(): Promise<string> {
+async function createFirebaseProject(suggestedName?: string): Promise<string> {
+  // Generate a default project ID suggestion
+  const defaultProjectId = suggestedName 
+    ? suggestedName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/--+/g, '-').replace(/^-|-$/g, '')
+    : 'my-volo-app';
+
   const { projectId } = await inquirer.prompt([
     {
       type: 'input',
       name: 'projectId',
       message: 'Enter a project ID for your new Firebase project:',
+      default: defaultProjectId,
       validate: (input: string) => {
         if (!input.trim()) {
           return 'Project ID is required';
@@ -138,6 +227,25 @@ async function createFirebaseProject(): Promise<string> {
     }
   ]);
 
+  try {
+    return await attemptFirebaseProjectCreation(projectId, displayName);
+  } catch (error) {
+    // If it's a project ID conflict, ask for a new project ID
+    if (error instanceof FirebaseProjectIdConflictError) {
+      return await createFirebaseProject(suggestedName);
+    }
+    
+    // For Terms of Service errors, bubble them up to the retry logic
+    if (error instanceof FirebaseTermsOfServiceError) {
+      throw error;
+    }
+    
+    // For other errors, propagate them up
+    throw error;
+  }
+}
+
+async function attemptFirebaseProjectCreation(projectId: string, displayName: string): Promise<string> {
   const spinner = ora(`Creating Firebase project "${projectId}"...`).start();
 
   try {
@@ -148,16 +256,44 @@ async function createFirebaseProject(): Promise<string> {
     spinner.fail('Failed to create Firebase project');
     
     // Check if project ID already exists
-    if (error instanceof Error && error.message.includes('already exists')) {
-      logger.warning(`Project ID "${projectId}" already exists. Please choose a different one.`);
-      return await createFirebaseProject();
+    if (error instanceof Error && (
+      error.message.includes('already exists') || 
+      error.message.includes('ALREADY_EXISTS') ||
+      error.message.includes('project with ID')
+    )) {
+      logger.newLine();
+      logger.error(`Project ID "${projectId}" is already taken.`);
+      console.log(chalk.yellow('💡 Firebase project IDs must be globally unique across all Firebase projects.'));
+      console.log(chalk.white('Try adding a number or your initials to make it unique (e.g., "my-app-2024" or "my-app-jd").'));
+      logger.newLine();
+      
+      throw new FirebaseProjectIdConflictError(projectId);
     }
+    
+    // Check if this is a Terms of Service error (fallback)
+    if (error instanceof Error && (
+      error.message.includes('Terms of Service') ||
+      error.message.includes('Callers must accept Terms of Service') ||
+      error.message.includes('TOS') ||
+      error.message.includes('Failed to create project. See firebase-debug.log') ||
+      error.message.includes('Failed to add Firebase to Google Cloud Platform project') ||
+      error.message.includes('The caller does not have permission')
+    )) {
+      displayTermsOfServiceMessage();
+      throw new FirebaseTermsOfServiceError();
+    }
+    
+    // For other errors, show brief error information
+    logger.newLine();
+    console.log(chalk.red('❌ Firebase project creation failed:'));
+    console.log(chalk.gray(error instanceof Error ? error.message : String(error)));
+    logger.newLine();
     
     throw new Error(`Failed to create Firebase project: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-async function selectExistingProject(): Promise<string> {
+async function selectExistingProject(suggestedName?: string): Promise<string> {
   const spinner = ora('Fetching your Firebase projects...').start();
   
   try {
@@ -171,7 +307,7 @@ async function selectExistingProject(): Promise<string> {
     
     if (!projects || projects.length === 0) {
       logger.info('No existing Firebase projects found. Let\'s create a new one.');
-      return await createFirebaseProject();
+      return await createFirebaseProject(suggestedName);
     }
     
     const { projectId } = await inquirer.prompt([
@@ -407,4 +543,37 @@ async function getWebAppConfig(projectId: string, appId: string): Promise<Fireba
     spinner.fail('Failed to get web app configuration');
     throw new Error(`Failed to get web app config: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+// Helper functions for displaying error messages
+function displayFirstTimeSetupMessage(): void {
+  logger.newLine();
+  logger.error('First Firebase project must be created manually.');
+  console.log(chalk.yellow('🔥 Google requires your first Firebase project to be created manually.'));
+  console.log(chalk.white('This is a one-time requirement - after this first project, you can create'));
+  console.log(chalk.white('additional projects programmatically through volo-app.'));
+  logger.newLine();
+  console.log(chalk.blue.bold('📋 Quick setup (takes 2 minutes):'));
+  console.log(chalk.white('1. Open Firebase Console: https://console.firebase.google.com'));
+  console.log(chalk.white('2. Click "Create a project" or "Add project"'));
+  console.log(chalk.white('3. Follow the setup wizard (accept defaults)'));
+  console.log(chalk.white('4. Once created, run your volo-app create command again'));
+  logger.newLine();
+  console.log(chalk.gray('💡 After this one-time setup, volo-app will handle everything automatically.'));
+  logger.newLine();
+}
+
+function displayTermsOfServiceMessage(): void {
+  logger.newLine();
+  logger.error('Google Cloud Platform Terms of Service must be accepted first.');
+  console.log(chalk.yellow('🔗 You need to accept Google Cloud\'s Terms of Service before creating Firebase projects.'));
+  logger.newLine();
+  console.log(chalk.blue.bold('📋 Quick fix:'));
+  console.log(chalk.white('1. Open Google Cloud Console: https://console.cloud.google.com'));
+  console.log(chalk.white('2. Sign in with the same Google account'));
+  console.log(chalk.white('3. Accept the Terms of Service when prompted'));
+  console.log(chalk.white('4. Wait 2-3 minutes, then retry'));
+  logger.newLine();
+  console.log(chalk.gray('💡 This is a one-time setup required for Google Cloud services.'));
+  logger.newLine();
 } 

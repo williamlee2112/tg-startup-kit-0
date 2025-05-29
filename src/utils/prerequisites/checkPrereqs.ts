@@ -146,6 +146,7 @@ export async function checkPrerequisites(options: PrerequisiteOptions = {}): Pro
   }
 
   let recheckNeeded = true;
+  const justInstalledLocally = new Set<string>(); // Track tools installed locally in this session
   
   while (recheckNeeded) {
     recheckNeeded = false;
@@ -156,6 +157,7 @@ export async function checkPrerequisites(options: PrerequisiteOptions = {}): Pro
 
     const missing: Prerequisite[] = [];
     const outdated: { prereq: Prerequisite; currentVersion: string }[] = [];
+    const localOnly: { prereq: Prerequisite; currentVersion: string }[] = [];
 
     for (const prereq of prerequisites) {
       const result = await checkPrerequisite(prereq);
@@ -176,7 +178,75 @@ export async function checkPrerequisites(options: PrerequisiteOptions = {}): Pro
           break;
         case 'installed_locally':
           logger.success(`${prereq.name} ${result.currentVersion || ''} ✓ (installed locally)`);
+          // Only track for upgrade if not just installed locally in this session
+          if (prereq.canInstallGlobally && !justInstalledLocally.has(prereq.name)) {
+            localOnly.push({ prereq, currentVersion: result.currentVersion! });
+          }
           break;
+      }
+    }
+
+    // Handle tools that are only available locally but could be installed globally
+    if (localOnly.length > 0 && !options.autoInstall) {
+      logger.newLine();
+      console.log(chalk.cyan.bold('🔄 Local Installation Detected'));
+      logger.newLine();
+      
+      console.log(chalk.white('The following tools are installed locally but could be installed globally for better convenience:'));
+      logger.newLine();
+      
+      for (const { prereq, currentVersion } of localOnly) {
+        console.log(chalk.cyan(`📦 ${prereq.name} ${currentVersion} (currently local only)`));
+        console.log(chalk.gray(`   ${prereq.description}`));
+        console.log('');
+      }
+      
+      console.log(chalk.white('Benefits of global installation:'));
+      console.log(chalk.white('  • Available in any directory without npx'));
+      console.log(chalk.white('  • Faster execution (no npx overhead)'));
+      console.log(chalk.white('  • Better IDE integration'));
+      logger.newLine();
+
+      const { upgradeToGlobal } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'upgradeToGlobal',
+          message: 'Would you like to install these tools globally?',
+          default: true
+        }
+      ]);
+
+      if (upgradeToGlobal) {
+        logger.newLine();
+        logger.info('Installing CLI tools globally...');
+        logger.newLine();
+        
+        const failedInstalls: Prerequisite[] = [];
+        
+        for (const { prereq } of localOnly) {
+          const success = await installCliTool(prereq, true); // Install globally
+          if (!success) {
+            failedInstalls.push(prereq);
+          }
+        }
+        
+        if (failedInstalls.length === 0) {
+          logger.newLine();
+          logger.success('All CLI tools installed globally! ✨');
+          logger.newLine();
+          console.log(chalk.green('🎉 Your tools are now available system-wide.'));
+          console.log(chalk.white('You may need to restart your terminal for PATH changes to take effect.'));
+        } else {
+          logger.newLine();
+          logger.warning('Some tools couldn\'t be installed globally:');
+          for (const prereq of failedInstalls) {
+            console.log(chalk.yellow(`  • ${prereq.name} (will continue using local version)`));
+          }
+        }
+        
+        // Recheck after installation
+        recheckNeeded = true;
+        continue;
       }
     }
 
@@ -265,10 +335,17 @@ export async function checkPrerequisites(options: PrerequisiteOptions = {}): Pro
             if (isGlobal && prereq.canInstallLocally) {
               logger.info(`${prereq.name} doesn't support global installation, trying local installation...`);
               success = await installCliTool(prereq, false); // Try local
+              if (success) {
+                // Track that this tool was installed locally in this session
+                justInstalledLocally.add(prereq.name);
+              }
             } else if (!isGlobal && prereq.canInstallGlobally) {
               logger.info(`${prereq.name} doesn't support local installation, trying global installation...`);
               success = await installCliTool(prereq, true); // Try global
             }
+          } else if (!isGlobal) {
+            // Track that this tool was installed locally in this session
+            justInstalledLocally.add(prereq.name);
           }
           
           if (!success) {

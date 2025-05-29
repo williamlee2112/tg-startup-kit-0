@@ -159,4 +159,59 @@ export async function execSupabase(
   options: CliOptions = {}
 ): Promise<{ stdout: string; stderr: string }> {
   return execCli('supabase', args, options);
+}
+
+/**
+ * Executes pnpm command with fallback to npx
+ */
+export async function execPnpm(
+  args: string[],
+  options: CliOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  const defaultOptions = {
+    stdio: 'pipe' as const,
+    timeout: 30000,
+    ...options
+  };
+
+  // First try global installation
+  try {
+    await which('pnpm');
+    logger.debug(`Using global pnpm`);
+    return await execa('pnpm', args, defaultOptions);
+  } catch (globalError) {
+    logger.debug(`Global pnpm not found, trying local installation via npx`);
+    
+    // Try local installation via npx
+    try {
+      return await execa('npx', ['pnpm', ...args], defaultOptions);
+    } catch (localError) {
+      logger.debug(`Local pnpm via npx also failed`);
+      
+      // Enhanced error handling to capture stderr
+      let errorMessage = `Failed to execute pnpm`;
+      if (localError instanceof Error) {
+        errorMessage += `: ${localError.message}`;
+        
+        // If it's an execa error, it might have stdout/stderr
+        if ('stderr' in localError && localError.stderr) {
+          errorMessage += `\nStderr: ${localError.stderr}`;
+        }
+        if ('stdout' in localError && localError.stdout) {
+          errorMessage += `\nStdout: ${localError.stdout}`;
+        }
+      }
+      
+      const enhancedError = new Error(errorMessage);
+      // Preserve original error properties
+      if (localError instanceof Error && 'stderr' in localError) {
+        (enhancedError as any).stderr = localError.stderr;
+      }
+      if (localError instanceof Error && 'stdout' in localError) {
+        (enhancedError as any).stdout = localError.stdout;
+      }
+      
+      throw enhancedError;
+    }
+  }
 } 

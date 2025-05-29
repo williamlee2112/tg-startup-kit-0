@@ -1,12 +1,10 @@
-import { spawn, exec } from 'child_process';
-import { promisify } from 'util';
+import { execa } from 'execa';
+import which from 'which';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs-extra';
 import os from 'os';
 import { logger } from './logger.js';
-
-const execAsync = promisify(exec);
 
 // Get the directory of this package (create-volo-app)
 const __filename = fileURLToPath(import.meta.url);
@@ -16,6 +14,12 @@ const packageRoot = join(__dirname, '../../'); // Go up from dist/utils to packa
 interface ExecResult {
   stdout: string;
   stderr: string;
+}
+
+interface CliOptions {
+  stdio?: 'pipe' | 'inherit';
+  timeout?: number;
+  cwd?: string;
 }
 
 /**
@@ -49,71 +53,61 @@ async function getWorkingDirectoryWithPackageJson(): Promise<string> {
 
 /**
  * Execute neonctl command with the given arguments
- * Assumes neonctl is already installed (handled by prerequisites check)
+ * Uses the same pattern as execCli with global/npx fallback
  * @param args Command arguments to pass to neonctl
  * @param options Execution options
  */
-export async function execNeonctl(args: string[], options: { stdio?: 'pipe' | 'inherit'; timeout?: number } = {}): Promise<ExecResult> {
-  const timeout = options.timeout || 30000; // 30 second default timeout
-  
+export async function execNeonctl(args: string[], options: CliOptions = {}): Promise<ExecResult> {
   // Get a working directory with package.json to prevent hanging
   const workingDir = await getWorkingDirectoryWithPackageJson();
   
+  const defaultOptions = {
+    stdio: 'pipe' as const,
+    timeout: 30000,
+    cwd: workingDir,
+    ...options
+  };
+
   logger.debug(`Executing neonctl with args: ${args.join(' ')} from directory: ${workingDir}`);
-  
-  return new Promise((resolve, reject) => {
-    // Use spawn with neonctl command (could be global or local via npx)
-    const child = spawn('neonctl', args, {
-      stdio: options.stdio === 'pipe' ? ['pipe', 'pipe', 'pipe'] : 'inherit',
-      shell: true,
-      cwd: workingDir,
-      env: {
-        ...process.env,
-      }
-    });
+
+  // First try global installation
+  try {
+    await which('neonctl');
+    logger.debug(`Using global neonctl`);
+    return await execa('neonctl', args, defaultOptions);
+  } catch (globalError) {
+    logger.debug(`Global neonctl not found, trying local installation`);
     
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    
-    // Set up timeout
-    const timeoutId = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
-      reject(new Error(`neonctl command timed out after ${timeout / 1000} seconds`));
-    }, timeout);
-    
-    // Collect output if stdio is 'pipe'
-    if (options.stdio === 'pipe') {
-      child.stdout?.on('data', (data) => {
-        stdout += data.toString();
-      });
+    // Try local installation via npx
+    try {
+      return await execa('npx', ['neonctl', ...args], defaultOptions);
+    } catch (localError) {
+      logger.debug(`Local neonctl via npx also failed`);
       
-      child.stderr?.on('data', (data) => {
-        stderr += data.toString();
-      });
+      // Enhanced error handling to capture stderr
+      let errorMessage = `Failed to execute neonctl`;
+      if (localError instanceof Error) {
+        errorMessage += `: ${localError.message}`;
+        
+        // If it's an execa error, it might have stdout/stderr
+        if ('stderr' in localError && localError.stderr) {
+          errorMessage += `\nStderr: ${localError.stderr}`;
+        }
+        if ('stdout' in localError && localError.stdout) {
+          errorMessage += `\nStdout: ${localError.stdout}`;
+        }
+      }
+      
+      const enhancedError = new Error(errorMessage);
+      // Preserve original error properties
+      if (localError instanceof Error && 'stderr' in localError) {
+        (enhancedError as any).stderr = localError.stderr;
+      }
+      if (localError instanceof Error && 'stdout' in localError) {
+        (enhancedError as any).stdout = localError.stdout;
+      }
+      
+      throw enhancedError;
     }
-    
-    child.on('close', (code) => {
-      clearTimeout(timeoutId);
-      
-      if (timedOut) {
-        return; // Already rejected
-      }
-      
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        reject(new Error(`neonctl command failed with exit code ${code}: ${stderr}`));
-      }
-    });
-    
-    child.on('error', (error) => {
-      clearTimeout(timeoutId);
-      
-      if (!timedOut) {
-        reject(error);
-      }
-    });
-  });
+  }
 } 

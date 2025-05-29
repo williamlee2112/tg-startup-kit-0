@@ -6,13 +6,13 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { logger } from '../utils/logger.js';
 import { cloneTemplate } from '../utils/template.js';
-import { setupFirebase } from '../services/firebase.js';
+import { setupFirebase, FirebaseProjectIdConflictError, FirebaseTermsOfServiceError, FirebaseFirstTimeSetupError } from '../services/firebase.js';
 import { setupCloudflare } from '../services/cloudflare.js';
 import { generateConfigFiles } from '../utils/config.js';
 import { validateProjectName } from '../utils/validation.js';
 import { setupDatabase } from '../services/database.js';
 import { withProgress } from '../utils/progress.js';
-import { execFirebase } from '../utils/cli.js';
+import { execFirebase, execPnpm } from '../utils/cli.js';
 import { execNeonctl } from '../utils/neonctl.js';
 
 interface CreateOptions {
@@ -150,23 +150,55 @@ async function handleBatchAuthentication(authStatus: AuthStatus, databaseProvide
     try {
       switch (service) {
         case 'Firebase':
-          await execFirebase(['login'], { stdio: 'inherit' });
+          spinner.stop();
+          logger.newLine();
+          console.log(chalk.yellow(`🔥 ${service} Authentication`));
+          console.log(chalk.white('The Firebase CLI may ask about data collection - you can respond as you prefer.'));
+          console.log(chalk.white('After that, a browser tab will open for you to sign in with your Google account.'));
+          logger.newLine();
+          
+          await execFirebase(['login'], { stdio: 'inherit', timeout: 300000 }); // 5 minute timeout for browser auth
+          
+          console.log(chalk.green(`✅ ${service} authentication completed`));
           break;
         case 'Neon':
-          await execNeonctl(['auth'], { stdio: 'inherit' });
+          spinner.stop();
+          logger.newLine();
+          console.log(chalk.yellow(`💾 ${service} Database Authentication`));
+          console.log(chalk.white('A browser tab will open for you to sign in to your Neon account.'));
+          logger.newLine();
+          
+          await execNeonctl(['auth'], { stdio: 'inherit', timeout: 300000 });
+          
+          console.log(chalk.green(`✅ ${service} authentication completed`));
           break;
         case 'Supabase':
+          spinner.stop();
+          logger.newLine();
+          console.log(chalk.yellow(`🗄️ ${service} Database Authentication`));
+          console.log(chalk.white('A browser tab will open for you to sign in to your Supabase account.'));
+          logger.newLine();
+          
           const { execSupabase } = await import('../utils/cli.js');
-          await execSupabase(['login'], { stdio: 'inherit' });
+          await execSupabase(['login'], { stdio: 'inherit', timeout: 300000 });
+          
+          console.log(chalk.green(`✅ ${service} authentication completed`));
           break;
         case 'Cloudflare':
+          spinner.stop();
+          logger.newLine();
+          console.log(chalk.yellow(`☁️ ${service} Authentication`));
+          console.log(chalk.white('A browser tab will open for you to sign in to your Cloudflare account.'));
+          logger.newLine();
+          
           const { execa } = await import('execa');
-          await execa('wrangler', ['login'], { stdio: 'inherit' });
+          await execa('wrangler', ['login'], { stdio: 'inherit', timeout: 300000 });
+          
+          console.log(chalk.green(`✅ ${service} authentication completed`));
           break;
       }
-      spinner.succeed(`${service} authentication completed`);
     } catch (error) {
-      spinner.fail(`${service} authentication failed`);
+      console.log(chalk.red(`❌ ${service} authentication failed`));
       throw new Error(`Failed to authenticate with ${service}`);
     }
   }
@@ -283,7 +315,7 @@ export async function createApp(projectName: string | undefined, options: Create
   }, 500);
   
   try {
-    await execa('pnpm', ['post-setup'], { 
+    await execPnpm(['post-setup'], { 
       cwd: directory, 
       stdio: options.verbose ? 'inherit' : 'pipe' 
     });
@@ -346,7 +378,7 @@ export async function createApp(projectName: string | undefined, options: Create
     
     try {
       // Change to the project directory and start the dev server
-      await execa('pnpm', ['run', 'dev:start'], { 
+      await execPnpm(['run', 'dev:start'], { 
         cwd: directory, 
         stdio: 'inherit' 
       });
@@ -399,18 +431,75 @@ async function getProjectName(provided?: string): Promise<string> {
 async function setupFirebaseWithRetry(maxRetries = 2, fastMode = false, projectName?: string): Promise<ProjectConfig['firebase']> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-              return await setupFirebase(fastMode, projectName);
+      return await setupFirebase(fastMode, projectName);
     } catch (error) {
+      // Handle Firebase first-time setup requirement
+      if (error instanceof FirebaseFirstTimeSetupError) {
+        logger.error('Firebase first-time setup required - please create your first project manually');
+        throw error;
+      }
+      
+      // Handle Firebase Terms of Service errors specially
+      if (error instanceof FirebaseTermsOfServiceError) {
+        logger.warning(`Firebase setup failed (attempt ${attempt}/${maxRetries}) - Terms of Service required`);
+        
+        if (attempt === maxRetries) {
+          logger.error('Firebase setup failed after multiple attempts - Terms of Service not accepted');
+          throw error;
+        }
+
+        const { retry } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'retry',
+            message: 'Have you accepted the Google Cloud Terms of Service and want to retry?',
+            default: false
+          }
+        ]);
+
+        if (!retry) {
+          logger.info('Please accept the Terms of Service and run the create command again when ready.');
+          throw error;
+        }
+
+        logger.info('Retrying Firebase setup...');
+        continue;
+      }
+      
+      // Handle Firebase project ID conflicts specially
+      if (error instanceof FirebaseProjectIdConflictError) {
+        logger.warning(`Firebase setup failed (attempt ${attempt}/${maxRetries}) - Project ID already exists`);
+        
+        if (attempt === maxRetries) {
+          logger.error('Firebase setup failed after multiple attempts - try a different project name');
+          throw error;
+        }
+
+        const { retry } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'retry',
+            message: 'Would you like to try Firebase setup again with a different project ID?',
+            default: true
+          }
+        ]);
+
+        if (!retry) {
+          throw error;
+        }
+
+        logger.info('Retrying Firebase setup...');
+        continue;
+      }
+      
+      // Handle other Firebase errors
       logger.warning(`Firebase setup failed (attempt ${attempt}/${maxRetries})`);
       
       if (attempt === maxRetries) {
         logger.error('Firebase setup failed after multiple attempts');
         logger.newLine();
         console.log(chalk.yellow.bold('⚡ Manual Firebase setup required:'));
-        console.log(chalk.cyan('   1. Visit https://console.firebase.google.com'));
-        console.log(chalk.cyan('   2. Create a new project'));
-        console.log(chalk.cyan('   3. Enable Google Authentication'));
-        console.log(chalk.cyan('   4. Create a web app and update your config files'));
+        console.log(chalk.cyan('   Visit https://console.firebase.google.com and create a project manually'));
         logger.newLine();
         throw error;
       }
