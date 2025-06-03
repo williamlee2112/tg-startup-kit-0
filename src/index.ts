@@ -24,6 +24,8 @@ export async function main() {
     .option('--skip-prereqs', 'Skip prerequisite checks (advanced users only)')
     .option('--install-deps', 'Automatically install missing dependencies without prompting')
     .option('--verbose', 'Enable verbose logging')
+    .option('--local', 'Local development mode (default): no external auth required')
+    .option('--full', 'Full production setup: authenticate with all services')
     .action(async (projectName: string | undefined, options) => {
       try {
         logger.setVerbose(options.verbose);
@@ -31,9 +33,27 @@ export async function main() {
         console.log(chalk.cyan.bold('🚀 Welcome to create-volo-app!'));
         console.log('');
 
-        // Check prerequisites unless skipped
+        // Determine flow mode: default to local unless --full is specified
+        const isLocalMode = !options.full;
+        
+        if (isLocalMode) {
+          console.log(chalk.green.bold('🏠 Local Development Mode'));
+          console.log(chalk.white('Creating a local-first development environment with:'));
+          console.log(chalk.white('  • Embedded PostgreSQL database'));
+          console.log(chalk.white('  • Firebase Auth emulator'));
+          console.log(chalk.white('  • Local development servers'));
+          console.log(chalk.white('  • No external authentication required'));
+          console.log('');
+          console.log(chalk.gray('💡 Use --full flag for production setup with external services'));
+        } else {
+          console.log(chalk.blue.bold('🌍 Full Production Setup Mode'));
+          console.log(chalk.white('Setting up production-ready app with external services'));
+        }
+        console.log('');
+
+        // Check prerequisites unless skipped (only for full mode)
         let databasePreference: string | undefined;
-        if (!options.skipPrereqs) {
+        if (!options.skipPrereqs && !isLocalMode) {
           const prereqResult = await checkPrerequisites({
             autoInstall: options.installDeps,
             databasePreference: options.db,
@@ -45,7 +65,8 @@ export async function main() {
         // Create the app
         await createApp(projectName, { 
           ...options, 
-          databasePreference: options.db || databasePreference
+          databasePreference: options.db || databasePreference,
+          local: isLocalMode
         });
 
       } catch (error) {

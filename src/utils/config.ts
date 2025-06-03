@@ -25,20 +25,12 @@ interface ProjectConfig {
 function validateReplacementValue(key: string, value: string): boolean {
   // Validate based on the type of configuration
   switch (key) {
-    case '{{FIREBASE_API_KEY}}':
-      return /^[A-Za-z0-9_-]+$/.test(value);
     case '{{DATABASE_URL}}':
       return validateUrl(value);
     case '{{WORKER_NAME}}':
       return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(value) && value.length <= 63;
     case '{{FIREBASE_PROJECT_ID}}':
       return /^[a-z][a-z0-9-]*[a-z0-9]$/.test(value) && value.length >= 6 && value.length <= 30;
-    case '{{FIREBASE_MESSAGING_SENDER_ID}}':
-      return /^\d+$/.test(value);
-    case '{{FIREBASE_APP_ID}}':
-      return /^1:\d+:web:[a-f0-9]+$/.test(value);
-    case '{{FIREBASE_MEASUREMENT_ID}}':
-      return /^G-[A-Z0-9]+$/.test(value) || value === 'G-PLACEHOLDER';
     default:
       return true;
   }
@@ -47,14 +39,10 @@ function validateReplacementValue(key: string, value: string): boolean {
 export async function generateConfigFiles(config: ProjectConfig): Promise<void> {
   const { directory, firebase, database, cloudflare } = config;
 
-  // Define placeholder replacements
+  // Define placeholder replacements - simplified for JWKS approach
   const replacements = {
     '{{WORKER_NAME}}': cloudflare.workerName,
     '{{FIREBASE_PROJECT_ID}}': firebase.projectId,
-    '{{FIREBASE_API_KEY}}': firebase.apiKey,
-    '{{FIREBASE_MESSAGING_SENDER_ID}}': firebase.messagingSenderId,
-    '{{FIREBASE_APP_ID}}': firebase.appId,
-    '{{FIREBASE_MEASUREMENT_ID}}': firebase.measurementId,
     '{{DATABASE_URL}}': database.url
   };
 
@@ -66,38 +54,49 @@ export async function generateConfigFiles(config: ProjectConfig): Promise<void> 
     }
   }
 
-  // Generate server configuration files
-  await generateDevVars(directory, replacements);
-  await generateWranglerConfig(directory, replacements);
+  // Generate Node.js development configuration files
+  await generateNodeEnvFile(directory, replacements);
   
-  // Generate UI configuration files
-  await generateFirebaseConfig(directory, replacements);
+  // Generate UI configuration files (still need this for Firebase config)
+  await generateFirebaseConfig(directory, config.firebase);
   
-  logger.debug('All configuration files generated successfully');
+  // Platform-specific templates are kept as templates and only populated during deployment
+  logger.debug('Development configuration files generated successfully');
+  logger.debug('Platform-specific templates ready for deployment');
 }
 
-async function generateDevVars(directory: string, replacements: Record<string, string>): Promise<void> {
-  const templatePath = path.join(directory, 'server', '.dev.vars.example');
-  const outputPath = path.join(directory, 'server', '.dev.vars');
+async function generateNodeEnvFile(directory: string, replacements: Record<string, string>): Promise<void> {
+  const templatePath = path.join(directory, 'server', '.env.example');
+  const outputPath = path.join(directory, 'server', '.env');
+  
+  // The .env.example should exist in the template
+  if (!await fs.pathExists(templatePath)) {
+    logger.error('Template missing required file: server/.env.example');
+    throw new Error('Invalid template: server/.env.example not found');
+  }
   
   await replaceTemplateFile(templatePath, outputPath, replacements);
-  logger.debug('Generated server/.dev.vars');
+  logger.debug('Generated server/.env for Node.js development');
 }
 
-async function generateWranglerConfig(directory: string, replacements: Record<string, string>): Promise<void> {
-  const templatePath = path.join(directory, 'server', 'wrangler.toml');
-  
-  // wrangler.toml is both template and output file
-  await replaceTemplateFileInPlace(templatePath, replacements);
-  logger.debug('Updated server/wrangler.toml');
-}
-
-async function generateFirebaseConfig(directory: string, replacements: Record<string, string>): Promise<void> {
+async function generateFirebaseConfig(directory: string, firebase: { projectId: string; apiKey: string; messagingSenderId: string; appId: string; measurementId: string }): Promise<void> {
   const templatePath = path.join(directory, 'ui', 'src', 'lib', 'firebase-config.template.json');
   const outputPath = path.join(directory, 'ui', 'src', 'lib', 'firebase-config.json');
   
-  await replaceTemplateFile(templatePath, outputPath, replacements);
-  logger.debug('Generated ui/src/lib/firebase-config.json');
+  // Use the complete Firebase configuration from the setup process
+  const firebaseConfig = {
+    apiKey: firebase.apiKey,
+    authDomain: `${firebase.projectId}.firebaseapp.com`,
+    projectId: firebase.projectId,
+    storageBucket: `${firebase.projectId}.appspot.com`,
+    messagingSenderId: firebase.messagingSenderId,
+    appId: firebase.appId,
+    measurementId: firebase.measurementId
+  };
+  
+  await fs.ensureDir(path.dirname(outputPath));
+  await fs.writeFile(outputPath, JSON.stringify(firebaseConfig, null, 2), 'utf-8');
+  logger.debug('Generated ui/src/lib/firebase-config.json with complete Firebase configuration');
 }
 
 async function replaceTemplateFile(
@@ -119,25 +118,16 @@ async function replaceTemplateFile(
   await fs.writeFile(outputPath, content, 'utf-8');
 }
 
-async function replaceTemplateFileInPlace(
-  filePath: string, 
-  replacements: Record<string, string>
-): Promise<void> {
-  let content = await fs.readFile(filePath, 'utf-8');
-  
-  // Replace all placeholders
-  for (const [placeholder, value] of Object.entries(replacements)) {
-    content = content.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
-  }
-  
-  // Write back to the same file
-  await fs.writeFile(filePath, content, 'utf-8');
-}
-
 export async function validateConfigGeneration(directory: string): Promise<boolean> {
   const requiredFiles = [
-    'server/.dev.vars',
+    'server/.env',
     'ui/src/lib/firebase-config.json'
+  ];
+  
+  // Check that platform templates exist (but are not populated yet)
+  const platformTemplates = [
+    'server/platforms/cloudflare/wrangler.toml.template',
+    'server/platforms/cloudflare/.dev.vars.template'
   ];
   
   for (const file of requiredFiles) {
@@ -151,6 +141,15 @@ export async function validateConfigGeneration(directory: string): Promise<boole
     const content = await fs.readFile(filePath, 'utf-8');
     if (content.includes('{{') && content.includes('}}')) {
       logger.debug(`Config validation failed: ${file} still contains placeholders`);
+      return false;
+    }
+  }
+  
+  // Validate platform templates exist
+  for (const template of platformTemplates) {
+    const templatePath = path.join(directory, template);
+    if (!await fs.pathExists(templatePath)) {
+      logger.debug(`Config validation failed: missing platform template ${template}`);
       return false;
     }
   }
