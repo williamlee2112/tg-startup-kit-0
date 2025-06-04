@@ -1,6 +1,6 @@
 {
   "name": "create-volo-app",
-  "version": "0.0.5",
+  "version": "0.1.0",
   "description": "CLI tool to create a new Volo app with Firebase Auth, Postgres, and Cloudflare deployment",
   "type": "module",
   "bin": {

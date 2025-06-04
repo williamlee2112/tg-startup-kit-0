@@ -10,6 +10,7 @@ const program = new Command();
 
 // Default template URL
 const DEFAULT_TEMPLATE = 'https://github.com/VoloBuilds/volo-app.git';
+const VOLO_APP_BRANCH = 'release/v0.1.0';
 
 export async function main() {
   program
@@ -18,7 +19,7 @@ export async function main() {
     .version('1.0.0')
     .argument('[project-name]', 'Name of the project to create')
     .option('-t, --template <url>', 'Custom template repository URL', DEFAULT_TEMPLATE)
-    .option('-b, --branch <branch>', 'Git branch to clone from template repository', 'main')
+    .option('-b, --branch <branch>', 'Git branch to clone from template repository', VOLO_APP_BRANCH)
     .option('--db <provider>', 'Database provider (neon, supabase, other)')
     .option('--fast', 'Fast mode: use smart defaults and minimal prompts')
     .option('--skip-prereqs', 'Skip prerequisite checks (advanced users only)')
