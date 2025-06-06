@@ -1,59 +1,122 @@
 # create-volo-app
 
-CLI tool to create a production-ready full-stack app with React, Firebase Auth, Postgres DB, and Cloudflare deployment - all preconfigured.
+CLI tool to create production-ready full-stack apps with React, Firebase Auth, and Postgres all set up for you. Start with a local stack in under 30 seconds and connect services later or run with --full to immediately start with production services.
 
 ## Quick Start
 
 ```bash
+# Local development (default) - working app in 30 seconds!
 npx create-volo-app my-app
+
+# Full production setup
+npx create-volo-app my-app --full
 ```
 
 ## What You Get
 
 **Frontend:**
 - ⚛️ React + TypeScript + Vite
-- 🎨 Tailwind CSS + ShadCN/UI components
+- 🎨 Tailwind CSS + ShadCN components
 - 🔐 Firebase Authentication (Google Sign-In)
 
 **Backend:**
-- 🔥 Hono API backend on Cloudflare Workers
+- 🔥 Hono API backend (NodeJS)
 - 🗄️ PostgreSQL with Drizzle ORM
 - 🔑 Firebase Admin SDK
 
-**Deployment:**
-- 🌐 Cloudflare Pages (frontend)
-- ⚡ Cloudflare Workers (API)
-- 🗄️ Neon, Supabase, or any PostgreSQL DB
+**Local Development (Default):**
+- ⚡ Runs UI + Server + DB + Auth on your computer
+- 🏠 Embedded PostgreSQL database
+- 🔧 Firebase Auth emulator
+- ✅ Zero sign-ins or accounts needed
+
+**Production (Optional):**
+- 🌐 Cloudflare Pages + Workers deployment ready
+- 🗄️ Neon, Supabase, or custom PostgreSQL
+- 🔐 Production Firebase Auth
+
+## Development Modes
+
+### 🏠 Local Development (Default)
+Perfect for learning, prototyping, and development:
+```bash
+npx create-volo-app my-app
+cd my-app
+pnpm run dev
+```
+- **Zero authentication required**
+- **Working app in 30 seconds**
+- All services running locally
+- Full authentication and database functionality
+
+### 🌍 Production Setup
+For production-ready apps:
+```bash
+# All production services
+npx create-volo-app my-app --full
+
+# Modular: mix local and production services
+npx create-volo-app my-app --auth          # Production Firebase + local database
+npx create-volo-app my-app --database neon # Production database + local auth
+npx create-volo-app my-app --deploy        # Deployment setup + local services
+```
+
+### 🔗 Progressive Connection
+Start local, connect production services later:
+```bash
+# Start with local development
+npx create-volo-app my-app
+cd my-app
+
+# Connect production services when ready
+pnpm connect:auth           # Production Firebase Auth
+pnpm connect:database       # Choose database provider
+pnpm connect:deploy         # Cloudflare deployment
+pnpm connection:status      # Check current setup
+```
 
 ## Requirements
 
-- Node.js 20+, pnpm 8+, Git, Firebase CLI
+- Node.js 20+
 
-The CLI will check these and guide installation if needed.
+The CLI will check and guide all other installation as needed.
 
-## Usage
+## Usage Examples
 
-### Basic
 ```bash
+# Local development - instant setup
 npx create-volo-app my-app
+
+# Production with specific database
+npx create-volo-app my-app --database neon
+npx create-volo-app my-app --database supabase
+
+# Production Firebase Auth only
+npx create-volo-app my-app --auth
+
+# Full production setup
+npx create-volo-app my-app --full
+
+# Fast mode (minimal prompts)
+npx create-volo-app my-app --full --fast
+
+# Connect to existing project
+npx create-volo-app --connect --database --path ./my-app
+npx create-volo-app --status --path ./my-app
 ```
 
-### Fast Mode (Recommended for beginners)
-```bash
-npx create-volo-app my-app --fast
-```
+## Local Services
 
-Fast mode uses smart defaults: creates new Firebase project, defaults to Neon DB, auto-generates Cloudflare Worker name, and skips Google Sign-In setup (configure later in Firebase Console).
+Your local development environment includes:
 
-### Options
-- `--fast` - Quick setup with smart defaults
-- `--template <url>` - Use custom template
-- `-b, --branch <name>` - Use specific branch of volo-app template (advanced)
-- `--db <provider>` - Database provider (neon, supabase, other)
-- `--skip-prereqs` - Skip prerequisite checks
-- `--verbose` - Detailed logging
+- **Database**: Embedded PostgreSQL at `./data/postgres`
+- **Auth**: Firebase emulator with demo users
+- **Frontend**: `http://localhost:5173`
+- **API**: `http://localhost:8787`
 
-## Deployment
+All data persists locally between development sessions.
+
+## Production Deployment
 
 ### Backend (Cloudflare Workers)
 ```bash

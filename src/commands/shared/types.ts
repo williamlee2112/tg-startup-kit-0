@@ -6,7 +6,10 @@ export interface CreateOptions {
   skipPrereqs: boolean;
   verbose: boolean;
   databasePreference?: string;
-  local?: boolean;
+  full?: boolean;
+  auth?: boolean | string;
+  database?: boolean | string;
+  deploy?: boolean;
 }
 
 export interface ProjectConfig {

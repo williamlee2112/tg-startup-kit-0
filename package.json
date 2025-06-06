@@ -46,6 +46,7 @@
     "inquirer": "^9.2.11",
     "neonctl": "^2.9.2",
     "node-fetch": "^3.3.2",
+    "open": "^10.0.0",
     "ora": "^7.0.1",
     "semver": "^7.5.4",
     "simple-git": "^3.20.0",
