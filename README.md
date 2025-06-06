@@ -1,6 +1,7 @@
 # create-volo-app
+AI-ready Full‑Stack Starter Kit for Vibe Coding, Rapid Prototyping & Production Scaling
 
-CLI tool to create production-ready full-stack apps with React, Firebase Auth, and Postgres all set up for you. Start with a local stack in under 30 seconds and connect services later or run with --full to immediately start with production services.
+Create full-stack apps with React, Firebase Auth, and Postgres all set up for you. Start with a full local stack in under 30 seconds and use `connect` when ready - or use the `--full` flag to immediately start with production services hooked up.
 
 ## Quick Start
 
@@ -13,16 +14,12 @@ npx create-volo-app my-app --full
 ```
 
 ## What You Get
-
-**Frontend:**
+**Full Stack:**
 - ⚛️ React + TypeScript + Vite
 - 🎨 Tailwind CSS + ShadCN components
 - 🔐 Firebase Authentication (Google Sign-In)
-
-**Backend:**
 - 🔥 Hono API backend (NodeJS)
-- 🗄️ PostgreSQL with Drizzle ORM
-- 🔑 Firebase Admin SDK
+- 🗄️ Postgres database with Drizzle ORM
 
 **Local Development (Default):**
 - ⚡ Runs UI + Server + DB + Auth on your computer
@@ -114,7 +111,7 @@ Your local development environment includes:
 - **Frontend**: `http://localhost:5173`
 - **API**: `http://localhost:8787`
 
-All data persists locally between development sessions.
+All data persists locally between development sessions in the `data` folder within your project
 
 ## Production Deployment
 
@@ -168,11 +165,13 @@ node bin/cli.js test-app
 ```
 
 ## Roadmap
-- Make Auth provider modular; support Supabase and Clerk
+- Make Auth provider modular; support Supabase and Clerk auth
 - Make deployment target more modular (support Docker, different backend TS runtimes like Bun)
 - Create UI on top of the CLI for more intuitive project config
 - Build optional "commit to git" support to push created volo-app to Git
 - Build optional auto-deploy process (git actions + any platform-specific configs)
+- Add payment integration for Lemon Squeezy
+- Create templates for common usecases
 
 ## Testing
 
