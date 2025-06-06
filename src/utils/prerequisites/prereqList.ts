@@ -49,8 +49,11 @@ export const corePrerequisites: Prerequisite[] = [
     canInstallLocally: true,
     canInstallGlobally: true,
     npmPackage: 'firebase-tools'
-  },
-  {
+  }
+];
+
+export const deploymentPrerequisites: Record<string, Prerequisite> = {
+  cloudflare: {
     name: 'Wrangler CLI',
     command: 'wrangler',
     version: '--version',
@@ -65,7 +68,7 @@ export const corePrerequisites: Prerequisite[] = [
     canInstallGlobally: true,
     npmPackage: 'wrangler'
   }
-];
+};
 
 export const databasePrerequisites: Record<string, Prerequisite> = {
   neon: {

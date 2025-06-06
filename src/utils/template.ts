@@ -109,8 +109,11 @@ export async function validateTemplate(templatePath: string): Promise<boolean> {
   // Check if this looks like a valid volo-app template
   const requiredFiles = [
     'package.json',
-    'server/wrangler.toml',
-    'server/.dev.vars.example',
+    'server/src/api.ts',
+    'server/src/server.ts',
+    'server/src/lib/env.ts',
+    'server/.env.example',
+    'server/platforms/cloudflare/wrangler.toml.template',
     'ui/src/lib/firebase-config.template.json',
     'scripts/post-setup.js'
   ];
@@ -131,6 +134,20 @@ export async function validateTemplate(templatePath: string): Promise<boolean> {
     if (!packageJson.template || !packageJson.template.placeholders) {
       logger.debug('Template validation failed: missing template.placeholders in package.json');
       return false;
+    }
+    
+    // Check if server package.json has the required scripts
+    const serverPackageJsonPath = path.join(templatePath, 'server', 'package.json');
+    if (await fs.pathExists(serverPackageJsonPath)) {
+      const serverPackageJson = await fs.readJson(serverPackageJsonPath);
+      const requiredScripts = ['dev', 'deploy', 'deploy:cf'];
+      
+      for (const script of requiredScripts) {
+        if (!serverPackageJson.scripts || !serverPackageJson.scripts[script]) {
+          logger.debug(`Template validation failed: missing script "${script}" in server/package.json`);
+          return false;
+        }
+      }
     }
     
     return true;

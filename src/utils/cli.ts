@@ -214,4 +214,58 @@ export async function execPnpm(
       throw enhancedError;
     }
   }
+}
+
+/**
+ * Executes pnpm command in detached mode (for dev servers)
+ * This spawns a completely separate process that continues running after the CLI exits
+ */
+export async function execPnpmDetached(
+  args: string[],
+  options: CliOptions = {}
+): Promise<void> {
+  const { spawn } = await import('child_process');
+  
+  // Determine which pnpm command to use
+  let command = 'pnpm';
+  let commandArgs = args;
+  
+  try {
+    await which('pnpm');
+    logger.debug(`Using global pnpm for detached execution`);
+  } catch {
+    logger.debug(`Global pnpm not found, using npx for detached execution`);
+    command = 'npx';
+    commandArgs = ['pnpm', ...args];
+  }
+
+  return new Promise((resolve, reject) => {
+    // Spawn process that continues in the same terminal
+    const child = spawn(command, commandArgs, {
+      cwd: options.cwd,
+      detached: false,  // Don't detach - stay in same terminal
+      stdio: 'inherit', // Inherit stdio to stay in same terminal
+      shell: true
+    });
+
+    // Handle immediate startup errors
+    child.on('error', (error) => {
+      reject(new Error(`Failed to start process: ${error.message}`));
+    });
+
+    // Give the process a moment to start up, then resolve
+    setTimeout(() => {
+      if (!child.killed) {
+        logger.debug(`Process started successfully with PID: ${child.pid}`);
+        resolve();
+        
+        // Exit the CLI process after a short delay to let the dev server fully start
+        setTimeout(() => {
+          process.exit(0);
+        }, 2000);
+      } else {
+        reject(new Error('Process failed to start'));
+      }
+    }, 1000);
+  });
 } 

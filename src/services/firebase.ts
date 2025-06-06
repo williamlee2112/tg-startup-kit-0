@@ -347,7 +347,9 @@ async function setupFirebaseAuth(projectId: string): Promise<void> {
   ]);
 
   if (!setupGoogleAuth) {
+    logger.newLine();
     logger.info('Skipping Google Sign-In setup. You can configure authentication later.');
+    logger.newLine();
     console.log(chalk.blue('📚 To set up authentication later:'));
     console.log(chalk.gray('1. Go to: https://console.firebase.google.com/project/' + projectId + '/authentication/providers'));
     console.log(chalk.gray('2. Choose your preferred authentication methods'));

@@ -1,7 +1,7 @@
 {
   "name": "create-volo-app",
-  "version": "0.0.5",
-  "description": "CLI tool to create a new Volo app with Firebase Auth, Postgres, and Cloudflare deployment",
+  "version": "0.2.0",
+  "description": "CLI tool to create AI-ready full-stack apps with an integrated React frontend, Hono backend, Auth, and Postgres database.",
   "type": "module",
   "bin": {
     "create-volo-app": "./bin/cli.js"
@@ -46,6 +46,7 @@
     "inquirer": "^9.2.11",
     "neonctl": "^2.9.2",
     "node-fetch": "^3.3.2",
+    "open": "^10.0.0",
     "ora": "^7.0.1",
     "semver": "^7.5.4",
     "simple-git": "^3.20.0",

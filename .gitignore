@@ -21,6 +21,9 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Devtrail AI coding plan
+.devtrail/
+
 # Runtime data
 pids
 *.pid
