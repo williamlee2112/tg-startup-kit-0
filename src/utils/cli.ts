@@ -43,7 +43,7 @@ export async function execCli(
 ): Promise<{ stdout: string; stderr: string }> {
   const defaultOptions = {
     stdio: 'pipe' as const,
-    timeout: 30000,
+    timeout: 300000, // 5 minutes
     ...options
   };
 
@@ -118,7 +118,7 @@ export async function execGit(
 ): Promise<{ stdout: string; stderr: string }> {
   const defaultOptions = {
     stdio: 'pipe' as const,
-    timeout: 30000,
+    timeout: 300000, // 5 minutes
     ...options
   };
 
@@ -170,7 +170,7 @@ export async function execPnpm(
 ): Promise<{ stdout: string; stderr: string }> {
   const defaultOptions = {
     stdio: 'pipe' as const,
-    timeout: 30000,
+    timeout: 300000, // 5 minutes
     ...options
   };
 

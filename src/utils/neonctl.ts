@@ -63,7 +63,7 @@ export async function execNeonctl(args: string[], options: CliOptions = {}): Pro
   
   const defaultOptions = {
     stdio: 'pipe' as const,
-    timeout: 30000,
+    timeout: 300000, // 5 minutes
     cwd: workingDir,
     ...options
   };
