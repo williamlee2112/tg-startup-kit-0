@@ -24,7 +24,8 @@ export async function createApp(
 
   // Get project name
   const name = await getProjectName(projectName);
-  const directory = await validateAndPrepareDirectory(name);
+  const isCurrentDirectory = projectName === '.';
+  const directory = await validateAndPrepareDirectory(name, isCurrentDirectory);
 
   // Determine setup type for messaging
   const isFullProduction = connectionFlags.auth && connectionFlags.database && connectionFlags.deploy;
@@ -203,7 +204,9 @@ export async function createApp(
   logger.newLine();
   
   console.log(chalk.green.bold('▶️  Next steps:'));
-  console.log(chalk.cyan(`   cd ${name}`));
+  if (!isCurrentDirectory) {
+    console.log(chalk.cyan(`   cd ${name}`));
+  }
   console.log(chalk.cyan('   pnpm run dev'));
   
   // Show connection upgrade options only for non-full-production setups

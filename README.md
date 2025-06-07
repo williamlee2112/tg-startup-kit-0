@@ -84,6 +84,9 @@ The CLI will check and guide all other installation as needed.
 # Local development - instant setup
 npx create-volo-app my-app
 
+# Create project in current folder
+npx create-volo-app .
+
 # Production with specific database
 npx create-volo-app my-app --database neon
 npx create-volo-app my-app --database supabase

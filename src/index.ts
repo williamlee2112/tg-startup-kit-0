@@ -39,6 +39,9 @@ Examples:
   # Default: local development (no auth required)
   npx create-volo-app my-app
 
+  # Create in current directory
+  npx create-volo-app .
+
   # Full production setup
   npx create-volo-app my-app --full
   
