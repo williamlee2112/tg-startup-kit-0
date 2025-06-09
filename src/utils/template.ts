@@ -1,7 +1,9 @@
 import fs from 'fs-extra';
 import path from 'path';
+import { createWriteStream } from 'fs';
+import { pipeline } from 'stream/promises';
+import { tmpdir } from 'os';
 import { logger } from './logger.js';
-import { execGit } from './cli.js';
 
 export function validateTemplateUrl(url: string): boolean {
   try {
@@ -14,80 +16,232 @@ export function validateTemplateUrl(url: string): boolean {
   }
 }
 
-export async function cloneTemplate(
+/**
+ * Extracts owner and repo from a git URL
+ */
+function parseGitUrl(url: string): { owner: string; repo: string } {
+  // Handle different URL formats:
+  // https://github.com/owner/repo.git
+  // https://github.com/owner/repo
+  // git@github.com:owner/repo.git
+  
+  let cleanUrl = url;
+  
+  // Remove .git suffix if present
+  if (cleanUrl.endsWith('.git')) {
+    cleanUrl = cleanUrl.slice(0, -4);
+  }
+  
+  // Handle SSH format
+  if (cleanUrl.startsWith('git@')) {
+    // git@github.com:owner/repo -> github.com/owner/repo
+    cleanUrl = cleanUrl.replace(/^git@([^:]+):/, 'https://$1/');
+  }
+  
+  // Parse the URL
+  const parsedUrl = new URL(cleanUrl);
+  const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+  
+  if (pathParts.length < 2) {
+    throw new Error(`Invalid repository URL: ${url}`);
+  }
+  
+  return {
+    owner: pathParts[0],
+    repo: pathParts[1]
+  };
+}
+
+/**
+ * Downloads and extracts a GitHub repository using tarball
+ */
+export async function downloadTemplate(
   templateUrl: string, 
   targetDirectory: string,
-  branch?: string,
+  branch: string = 'main',
   onProgress?: (progress: number, message?: string) => void
 ): Promise<void> {
-  logger.debug(`Cloning template from ${templateUrl} to ${targetDirectory}${branch ? ` (branch: ${branch})` : ''}`);
+  logger.debug(`Downloading template from ${templateUrl} to ${targetDirectory} (branch: ${branch})`);
   
   // Validate template URL for security
   if (!validateTemplateUrl(templateUrl)) {
     throw new Error(`Invalid or untrusted template URL: ${templateUrl}. Only GitHub, GitLab, and Bitbucket repositories are allowed.`);
   }
   
-  onProgress?.(10, 'Preparing to clone template');
-  
-  // Ensure parent directory exists
-  await fs.ensureDir(path.dirname(targetDirectory));
+  onProgress?.(10, 'Preparing to download template');
   
   try {
-    onProgress?.(20, 'Cloning repository');
+    // Parse the repository URL to extract owner and repo
+    const { owner, repo } = parseGitUrl(templateUrl);
     
-    // Clone the repository with optional branch specification
-    const cloneArgs = ['clone'];
-    if (branch) {
-      cloneArgs.push('-b', branch);
-    }
-    cloneArgs.push(templateUrl, targetDirectory);
+    // Construct the tarball URL
+    const tarballUrl = `https://github.com/${owner}/${repo}/archive/${branch}.tar.gz`;
     
-    await execGit(cloneArgs, {
-      stdio: 'pipe'
-    });
+    onProgress?.(20, 'Downloading template archive');
+    logger.debug(`Downloading tarball from: ${tarballUrl}`);
     
-    onProgress?.(50, 'Validating template structure');
+         // Create a temporary file for the tarball
+     const tempFile = path.join(tmpdir(), `volo-template-${Date.now()}.tar.gz`);
+     
+     // Download the tarball to temp file
+     await downloadFile(tarballUrl, tempFile);
+     
+     // Ensure target directory exists
+     await fs.ensureDir(targetDirectory);
+     
+     onProgress?.(40, 'Extracting template files');
+     
+     // Extract the tarball to the target directory
+     await extractTarball(tempFile, targetDirectory);
+     
+     // Clean up temp file
+     await fs.remove(tempFile);
     
-    // Validate template structure after cloning
+    onProgress?.(70, 'Validating template structure');
+    
+    // Validate template structure after extraction
     const isValidTemplate = await validateTemplate(targetDirectory);
     if (!isValidTemplate) {
       throw new Error(`Invalid template structure. The repository does not appear to be a valid Volo app template.`);
     }
     
-    onProgress?.(70, 'Preparing template files');
+    onProgress?.(85, 'Preparing template files');
     
     // Replace README.md with README.template.md for CLI users
     await replaceReadmeForCli(targetDirectory);
     
-    onProgress?.(80, 'Cleaning up git history');
+    onProgress?.(90, 'Initializing git repository');
     
-    // Remove .git directory to start fresh
-    const gitDir = path.join(targetDirectory, '.git');
-    if (await fs.pathExists(gitDir)) {
-      await fs.remove(gitDir);
-      logger.debug('Removed .git directory from template');
-    }
-    
-    onProgress?.(90, 'Initializing new repository');
-    
-    // Initialize new git repository
-    await execGit(['init'], { cwd: targetDirectory, stdio: 'pipe' });
-    await execGit(['add', '.'], { cwd: targetDirectory, stdio: 'pipe' });
-    await execGit(['commit', '-m', 'Initial commit from create-volo-app'], { 
-      cwd: targetDirectory, 
-      stdio: 'pipe' 
-    });
+    // Initialize a fresh git repository
+    await initializeGitRepo(targetDirectory);
     
     onProgress?.(100, 'Template ready');
     
-    logger.debug('Initialized new git repository');
+    logger.debug('Template downloaded and extracted successfully');
     
   } catch (error) {
-    // Clean up on failure
-    if (await fs.pathExists(targetDirectory)) {
-      await fs.remove(targetDirectory);
+    // Clean up on failure, but only if the directory was empty before
+    const isEmpty = await isDirectoryEmpty(targetDirectory);
+    if (isEmpty) {
+      try {
+        await fs.remove(targetDirectory);
+        logger.debug('Cleaned up empty directory after failure');
+      } catch (cleanupError) {
+        logger.debug(`Failed to cleanup directory: ${cleanupError}`);
+      }
     }
-    throw new Error(`Failed to clone template: ${error instanceof Error ? error.message : String(error)}`);
+    
+    throw new Error(`Failed to download template: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Downloads a file from a URL to a local path
+ */
+async function downloadFile(url: string, filePath: string): Promise<void> {
+  const response = await fetch(url);
+  
+  if (!response.ok) {
+    throw new Error(`Failed to download: ${response.status} ${response.statusText}`);
+  }
+  
+  if (!response.body) {
+    throw new Error('Response body is null');
+  }
+  
+  const fileStream = createWriteStream(filePath);
+  
+  // Convert ReadableStream to Node.js ReadableStream
+  const reader = response.body.getReader();
+  
+  return new Promise((resolve, reject) => {
+    const pump = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+                   if (!fileStream.write(value)) {
+           await new Promise<void>(resolve => fileStream.once('drain', resolve));
+         }
+        }
+        fileStream.end();
+        resolve();
+      } catch (error) {
+        fileStream.destroy();
+        reject(error);
+      }
+    };
+    
+    fileStream.on('error', reject);
+    fileStream.on('finish', resolve);
+    
+    pump().catch(reject);
+  });
+}
+
+/**
+ * Extracts a tarball file to a directory
+ */
+async function extractTarball(tarballPath: string, targetDirectory: string): Promise<void> {
+  const tar = await import('tar');
+  
+  // Extract with strip=1 to remove the top-level directory
+  await tar.extract({
+    file: tarballPath,
+    cwd: targetDirectory,
+    strip: 1,
+    filter: (path: string) => {
+      // Skip .git directories if they somehow exist in the tarball
+      return !path.includes('.git/');
+    }
+  });
+}
+
+/**
+ * Checks if a directory is empty
+ */
+async function isDirectoryEmpty(dirPath: string): Promise<boolean> {
+  try {
+    const files = await fs.readdir(dirPath);
+    return files.length === 0;
+  } catch {
+    return true; // Directory doesn't exist, so it's "empty"
+  }
+}
+
+/**
+ * Initializes a fresh git repository
+ */
+async function initializeGitRepo(targetDirectory: string): Promise<void> {
+  try {
+    // We no longer need execGit since we're not cloning
+    // Just use basic git commands if git is available
+    const { execa } = await import('execa');
+    
+    // Check if git is available
+    try {
+      await execa('git', ['--version'], { cwd: targetDirectory });
+    } catch {
+      logger.debug('Git not available, skipping git initialization');
+      return;
+    }
+    
+    await execa('git', ['init', '--initial-branch=main'], { cwd: targetDirectory });
+    await execa('git', ['add', '.'], { cwd: targetDirectory });
+    
+    // Try to commit, but don't fail if git user is not configured
+    try {
+      await execa('git', ['commit', '-m', 'Initial commit from create-volo-app'], { 
+        cwd: targetDirectory 
+      });
+      logger.debug('Initialized git repository and created initial commit');
+    } catch (commitError) {
+      logger.debug('Git user not configured, files staged but not committed');
+    }
+  } catch (error) {
+    logger.debug(`Failed to initialize git repository: ${error}`);
+    // Don't throw - git initialization is optional
   }
 }
 
@@ -155,4 +309,7 @@ export async function validateTemplate(templatePath: string): Promise<boolean> {
     logger.debug(`Template validation failed: ${error}`);
     return false;
   }
-} 
+}
+
+// For backward compatibility, export the old function name as an alias
+export const cloneTemplate = downloadTemplate; 
