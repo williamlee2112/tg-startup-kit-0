@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import ora from 'ora';
 import { logger } from '../utils/logger.js';
-import { cloneTemplate } from '../utils/template.js';
+import { downloadTemplate } from '../utils/template.js';
 import { setupCloudflare } from '../services/cloudflare.js';
 import { generateModularConfigFiles } from '../utils/modularConfig.js';
 import { execPnpm, execPnpmDetached } from '../utils/cli.js';
@@ -60,17 +60,17 @@ export async function createApp(
   
   logger.newLine();
 
-  // Step 1: Clone template
+  // Step 1: Download template
   const cloneSpinner = ora({
-    text: 'Cloning template...',
+    text: 'Downloading template...',
     spinner: 'line'
   }).start();
   
   try {
-    await cloneTemplate(options.template, directory, options.branch);
-    cloneSpinner.succeed('Template cloned successfully');
+    await downloadTemplate(options.template, directory, options.branch);
+    cloneSpinner.succeed('Template downloaded successfully');
   } catch (error) {
-    cloneSpinner.fail('Failed to clone template');
+    cloneSpinner.fail('Failed to download template');
     throw error;
   }
 
