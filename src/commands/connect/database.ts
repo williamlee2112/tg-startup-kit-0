@@ -62,7 +62,7 @@ export async function connectDatabase(projectPath: string, provider?: string): P
         return;
       }
     } else if (currentConfig.isLocal) {
-      console.log(chalk.blue('🏠 Currently using local embedded PostgreSQL'));
+      console.log(chalk.blue('🏠 Currently using local embedded PostgreSQL server'));
       await checkLocalDatabaseData(projectPath);
     } else {
       console.log(chalk.yellow('⚠️  No database configuration found'));
@@ -167,13 +167,16 @@ async function detectCurrentDatabaseConfig(projectPath: string) {
     }
     
     const connectionString = dbUrlMatch[1].trim();
-    const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
+    const isLocal = (connectionString.includes('localhost') || connectionString.includes('127.0.0.1')) && 
+                   connectionString.includes('postgres:password');
     
     let provider = 'custom';
     if (connectionString.includes('neon.tech')) {
       provider = 'neon';
     } else if (connectionString.includes('supabase.')) {
       provider = 'supabase';
+    } else if (isLocal) {
+      provider = 'local';
     }
     
     return {
@@ -315,4 +318,4 @@ async function promptDatabaseSetup(): Promise<boolean> {
     }
   ]);
   return setupSchema;
-} 
+}

@@ -139,21 +139,19 @@ async function generateModularUIEnv(
 }
 
 async function generateWranglerConfig(directory: string, config: ProjectConfig): Promise<void> {
+  const templatePath = path.join(directory, 'server', 'platforms', 'cloudflare', 'wrangler.toml.template');
   const wranglerPath = path.join(directory, 'server', 'wrangler.toml');
   
-  const wranglerConfig = `name = "${config.cloudflare.workerName}"
-main = "src/index.ts"
-compatibility_date = "2024-01-01"
-
-[vars]
-NODE_ENV = "production"
-
-[[migrations]]
-tag = "v1"
-new_classes = ["VoLo"]
-`;
+  // Read the template file
+  const template = await fs.readFile(templatePath, 'utf-8');
+  
+  // Replace placeholders with actual values
+  const wranglerConfig = template
+    .replace(/{{WORKER_NAME}}/g, config.cloudflare.workerName)
+    .replace(/{{FIREBASE_PROJECT_ID}}/g, config.firebase.projectId)
+    .replace(/{{DATABASE_URL}}/g, config.database.url);
 
   await fs.ensureDir(path.dirname(wranglerPath));
   await fs.writeFile(wranglerPath, wranglerConfig);
-  logger.debug('Generated wrangler.toml for production deployment');
+  logger.debug('Generated wrangler.toml from template for production deployment');
 } 
