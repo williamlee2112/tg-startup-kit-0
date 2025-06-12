@@ -3,6 +3,8 @@ AI-ready Full‑Stack Starter Kit for Vibe Coding, Rapid Prototyping & Productio
 
 Create full-stack apps with React, Firebase Auth, and Postgres all set up for you. Start with a full local stack in under 30 seconds and use `connect` when ready - or use the `--full` flag to immediately start with production services hooked up.
 
+![Demo](assets/demo.gif)
+
 ## Quick Start
 
 ```bash
