@@ -78,6 +78,9 @@ export async function connectAuth(projectPath: string): Promise<void> {
     await updateFirebaseConfig(projectPath, config);
     await updateEnvironmentFiles(projectPath, config);
     
+    // Clean up Firebase emulator configuration
+    await cleanupFirebaseEmulatorConfig(projectPath);
+    
     console.log(chalk.green('\n🎉 Successfully connected to production Firebase Auth!'));
     console.log(chalk.cyan('\n📋 Next steps:'));
     console.log('   1. Restart your development server: pnpm dev');
@@ -201,4 +204,53 @@ async function updateEnvironmentFiles(projectPath: string, config: FirebaseConfi
   await writeFile(serverEnvPath, serverEnvContent.trim() + '\n');
   
   console.log(chalk.green('✅ Environment files updated for production Firebase'));
+}
+
+async function cleanupFirebaseEmulatorConfig(projectPath: string) {
+  // Clean up .env file
+  const serverEnvPath = path.join(projectPath, 'server', '.env');
+  if (existsSync(serverEnvPath)) {
+    let envContent = await readFile(serverEnvPath, 'utf-8');
+    let hasChanges = false;
+
+    // Remove FIREBASE_AUTH_EMULATOR_HOST line and associated comment
+    const firebaseLineRegex = /^# Firebase Auth Emulator.*\nFIREBASE_AUTH_EMULATOR_HOST=.*$/m;
+    const simpleFirebaseLineRegex = /^FIREBASE_AUTH_EMULATOR_HOST=.*$/m;
+    
+    if (firebaseLineRegex.test(envContent)) {
+      envContent = envContent.replace(firebaseLineRegex, '');
+      hasChanges = true;
+    } else if (simpleFirebaseLineRegex.test(envContent)) {
+      envContent = envContent.replace(simpleFirebaseLineRegex, '');
+      hasChanges = true;
+    }
+
+    if (hasChanges) {
+      // Clean up any multiple empty lines left behind
+      envContent = envContent.replace(/\n\n+/g, '\n\n').trim() + '\n';
+      await writeFile(serverEnvPath, envContent);
+      console.log(chalk.green('✅ Removed Firebase emulator configuration from .env'));
+    }
+  }
+
+  // Clean up wrangler.toml file
+  const wranglerPath = path.join(projectPath, 'server', 'wrangler.toml');
+  if (existsSync(wranglerPath)) {
+    let wranglerContent = await readFile(wranglerPath, 'utf-8');
+    let hasChanges = false;
+
+    // Remove FIREBASE_AUTH_EMULATOR_HOST line
+    const firebaseLineRegex = /^FIREBASE_AUTH_EMULATOR_HOST\s*=.*$/m;
+    if (firebaseLineRegex.test(wranglerContent)) {
+      wranglerContent = wranglerContent.replace(firebaseLineRegex, '');
+      hasChanges = true;
+    }
+
+    if (hasChanges) {
+      // Clean up any empty lines left behind
+      wranglerContent = wranglerContent.replace(/\n\n+/g, '\n\n');
+      await writeFile(wranglerPath, wranglerContent);
+      console.log(chalk.green('✅ Removed Firebase emulator configuration from wrangler.toml'));
+    }
+  }
 } 

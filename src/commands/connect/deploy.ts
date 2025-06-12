@@ -34,6 +34,19 @@ export async function connectDeploy(projectPath: string): Promise<void> {
       console.log(chalk.blue('🆕 Setting up new deployment configuration'));
     }
     
+    // Check if using embedded postgres (incompatible with Cloudflare Workers)
+    const usingEmbeddedPostgres = await checkForEmbeddedPostgres(projectPath);
+    if (usingEmbeddedPostgres) {
+      console.log(chalk.red('\n❌ Cannot deploy to Cloudflare Workers with embedded PostgreSQL'));
+      console.log(chalk.yellow('Embedded PostgreSQL is Node.js-specific and cannot run in Cloudflare Workers.\n'));
+      console.log(chalk.blue('📋 To deploy, you need to connect to a cloud database first:'));
+      console.log('   1. Run: pnpm connect:database');
+      console.log('   2. Choose a cloud provider (Neon, Supabase, etc.)');
+      console.log('   3. Then run pnpm connect:deploy again\n');
+      console.log(chalk.gray('💡 This will also remove the embedded-postgres dependency to fix build issues.'));
+      return;
+    }
+
     // Confirm before proceeding
     if (!(await confirmProductionSetup(rl, 'production deployment'))) {
       console.log(chalk.blue('👋 Operation cancelled'));
@@ -47,8 +60,13 @@ export async function connectDeploy(projectPath: string): Promise<void> {
     console.log(chalk.blue('\n🔐 Setting up Cloudflare...'));
     const cloudflareResult = await setupCloudflare(projectName, false);
     
-    // Update wrangler configuration
-    await updateWranglerConfig(projectPath, { workerName: cloudflareResult.workerName });
+      // Update wrangler configuration
+  await updateWranglerConfig(projectPath, { workerName: cloudflareResult.workerName });
+  
+  // Note: Using src/api.ts as entry point (already CF Workers compatible)
+    
+    // Update package.json scripts for Cloudflare development
+    await updatePackageJsonForCloudflare(projectPath);
     
     // Set up environment variables
     await setupWorkerEnvironment(projectPath);
@@ -97,22 +115,165 @@ async function detectCurrentDeploymentConfig(projectPath: string) {
 }
 
 async function updateWranglerConfig(projectPath: string, config: any) {
+  const templatePath = path.join(projectPath, 'server', 'platforms', 'cloudflare', 'wrangler.toml.template');
   const wranglerPath = path.join(projectPath, 'server', 'wrangler.toml');
   
-  const wranglerConfig = `name = "${config.workerName}"
-main = "src/index.ts"
-compatibility_date = "2024-01-01"
-
-[vars]
-NODE_ENV = "production"
-
-[[migrations]]
-tag = "v1"
-new_classes = ["VoLo"]
-`;
+  // Read the template file
+  let template = await readFile(templatePath, 'utf-8');
+  
+  // Read all environment variables from .env file
+  const envPath = path.join(projectPath, 'server', '.env');
+  let allEnvVars: Record<string, string> = {};
+  
+  if (existsSync(envPath)) {
+    const envContent = await readFile(envPath, 'utf-8');
+    allEnvVars = parseEnvFile(envContent);
+  }
+  
+  // Replace basic placeholders with actual values
+  let wranglerConfig = template
+    .replace(/{{WORKER_NAME}}/g, config.workerName)
+    .replace(/{{FIREBASE_PROJECT_ID}}/g, allEnvVars.FIREBASE_PROJECT_ID || 'demo-project')
+    .replace(/{{DATABASE_URL}}/g, allEnvVars.DATABASE_URL || '');
+  
+  // Generate complete [vars] section with all environment variables
+  const varsSection = generateVarsSection(allEnvVars);
+  
+  // Replace the [vars] section in the template with the complete one
+  wranglerConfig = wranglerConfig.replace(
+    /\[vars\][\s\S]*?(?=\n\[|\n#|$)/,
+    varsSection
+  );
 
   await writeFile(wranglerPath, wranglerConfig);
-  console.log(chalk.green('✅ Wrangler configuration updated'));
+  console.log(chalk.green(`✅ Wrangler configuration updated with ${Object.keys(allEnvVars).length} environment variables`));
+}
+
+function generateVarsSection(envVars: Record<string, string>): string {
+  let varsSection = '[vars]\n';
+  
+  // Always set RUNTIME to "cloudflare" for Cloudflare Workers
+  varsSection += 'RUNTIME = "cloudflare"\n';
+  
+  // Sort environment variables for consistent output
+  const sortedKeys = Object.keys(envVars).sort();
+  
+  sortedKeys.forEach(key => {
+    const value = envVars[key];
+    // Skip empty values, NODE_ENV (not needed in CF Workers), and RUNTIME (already handled above)
+    if (value && key !== 'NODE_ENV' && key !== 'RUNTIME') {
+      // Escape quotes in values
+      const escapedValue = value.replace(/"/g, '\\"');
+      varsSection += `${key} = "${escapedValue}"\n`;
+    }
+  });
+  
+  // If no other variables were added, add a comment
+  if (Object.keys(envVars).filter(key => envVars[key] && key !== 'NODE_ENV' && key !== 'RUNTIME').length === 0) {
+    varsSection += '# Other environment variables from .env will be added here\n';
+  }
+  
+  return varsSection;
+}
+
+// Note: createWorkerEntryPoint removed - using existing api.ts as entry point
+
+async function updatePackageJsonForCloudflare(projectPath: string) {
+  const serverPackageJsonPath = path.join(projectPath, 'server', 'package.json');
+  
+  if (existsSync(serverPackageJsonPath)) {
+    const packageJson = JSON.parse(await readFile(serverPackageJsonPath, 'utf-8'));
+    
+    // Update scripts to use wrangler for development
+    // Port is handled by wrangler.toml [dev] section which is updated by port-manager.js
+    packageJson.scripts = {
+      ...packageJson.scripts,
+      'dev': 'wrangler dev --local-protocol http',
+      'dev:node': 'tsx watch src/server.ts', // Keep Node.js option available
+    };
+    
+    await writeFile(serverPackageJsonPath, JSON.stringify(packageJson, null, 2));
+    console.log(chalk.green('✅ Server package.json updated for Cloudflare development'));
+  }
+  
+  // Also update root package.json dev script
+  const rootPackageJsonPath = path.join(projectPath, 'package.json');
+  
+  if (existsSync(rootPackageJsonPath)) {
+    const packageJson = JSON.parse(await readFile(rootPackageJsonPath, 'utf-8'));
+    
+    // Update the dev script to use wrangler
+    if (packageJson.scripts && packageJson.scripts.dev) {
+      packageJson.scripts.dev = packageJson.scripts.dev.replace(
+        'cd server && pnpm dev',
+        'cd server && pnpm dev'
+      ); // This will now use the updated server dev script
+      packageJson.scripts['dev:node'] = packageJson.scripts.dev.replace(
+        'cd server && pnpm dev',
+        'cd server && pnpm dev:node'
+      ); // Keep Node.js option
+    }
+    
+    await writeFile(rootPackageJsonPath, JSON.stringify(packageJson, null, 2));
+    console.log(chalk.green('✅ Root package.json updated for Cloudflare development'));
+  }
+}
+
+async function checkForEmbeddedPostgres(projectPath: string): Promise<boolean> {
+  // Check if embedded-postgres dependency exists in package.json
+  const packageJsonPath = path.join(projectPath, 'server', 'package.json');
+  
+  if (!existsSync(packageJsonPath)) {
+    return false;
+  }
+  
+  try {
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf-8'));
+    const hasEmbeddedPostgres = 
+      packageJson.dependencies?.['embedded-postgres'] ||
+      packageJson.devDependencies?.['embedded-postgres'];
+    
+    if (!hasEmbeddedPostgres) {
+      return false;
+    }
+    
+    // Also check if DATABASE_URL indicates embedded postgres usage
+    const envPath = path.join(projectPath, 'server', '.env');
+    if (existsSync(envPath)) {
+      const envContent = await readFile(envPath, 'utf-8');
+      const envVars = parseEnvFile(envContent);
+      const dbUrl = envVars.DATABASE_URL;
+      
+      // If DATABASE_URL is empty or points to localhost with embedded postgres pattern
+      if (!dbUrl || (dbUrl.includes('localhost:') && dbUrl.includes('postgres:password'))) {
+        return true;
+      }
+    } else {
+      // No .env file means using default embedded postgres
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('Error checking for embedded postgres:', error);
+    return false;
+  }
+}
+
+function parseEnvFile(content: string): Record<string, string> {
+  const envVars: Record<string, string> = {};
+  
+  content.split('\n').forEach(line => {
+    const cleanLine = line.trim();
+    if (cleanLine && !cleanLine.startsWith('#')) {
+      const [key, ...valueParts] = cleanLine.split('=');
+      if (key && valueParts.length > 0) {
+        envVars[key.trim()] = valueParts.join('=').trim();
+      }
+    }
+  });
+  
+  return envVars;
 }
 
 async function setupWorkerEnvironment(projectPath: string) {
