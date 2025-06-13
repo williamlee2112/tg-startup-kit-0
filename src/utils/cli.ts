@@ -180,7 +180,14 @@ export async function execPnpm(
     logger.debug(`Using global pnpm`);
     return await execa('pnpm', args, defaultOptions);
   } catch (globalError) {
-    logger.debug(`Global pnpm not found, attempting to install pnpm`);
+    logger.debug(`Global pnpm not found, checking for local installation`);
+    
+    // Try local pnpm via npx before attempting to install
+    try {
+      logger.debug(`Trying local pnpm via npx`);
+      return await execa('npx', ['pnpm', ...args], defaultOptions);
+    } catch (localError) {
+      logger.debug(`Local pnpm also not found, attempting to install pnpm`);
     
     // Import the installation utilities
     const { installCliTool } = await import('./prerequisites/installCLIs.js');
@@ -232,6 +239,7 @@ export async function execPnpm(
           `Or install pnpm globally with: npm install -g pnpm`
         );
       }
+    }
     }
   }
 }
