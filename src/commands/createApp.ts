@@ -155,6 +155,7 @@ export async function createApp(
   }).start();
   
   let postSetupSucceeded = false;
+  let isDatabaseSetupFailure = false;
   try {
     await execPnpm(['post-setup'], { 
       cwd: directory, 
@@ -164,8 +165,22 @@ export async function createApp(
     postSetupSucceeded = true;
   } catch (error) {
     postSetupSpinner.fail('Post-setup failed');
+    
+    // Check if this is a database setup failure (exit code 1 from our post-setup script)
+    // If so, the post-setup script already showed the appropriate error message
+    if (error && typeof error === 'object' && 'code' in error && error.code === 1) {
+      isDatabaseSetupFailure = true;
+      // Don't show additional error messages - the post-setup script already handled this
+      return;
+    }
+    
     logger.error('Failed to complete project setup');
     logger.debug(`Post-setup error: ${error}`);
+  }
+
+  // Only show success/status messages if it's not a database setup failure
+  if (isDatabaseSetupFailure) {
+    return;
   }
 
   // Step 7: Success/Status message
