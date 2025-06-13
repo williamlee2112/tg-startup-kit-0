@@ -77,6 +77,7 @@ pnpm connection:status      # Check current setup
 ## Requirements
 
 - Node.js 20+
+- pnpm
 
 The CLI will check and guide all other installation as needed.
 
