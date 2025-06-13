@@ -81,7 +81,7 @@ export async function createApp(
   }).start();
   
   try {
-    await execPnpm(['install', '--enable-scripts'], { 
+    await execPnpm(['install'], { 
       cwd: directory, 
       stdio: options.verbose ? 'inherit' : 'pipe' 
     });
