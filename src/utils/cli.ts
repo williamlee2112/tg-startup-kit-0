@@ -246,7 +246,7 @@ export async function execPnpm(
 
 /**
  * Executes pnpm command in detached mode (for dev servers)
- * This spawns a completely separate process that continues running after the CLI exits
+ * This spawns a process and keeps the CLI alive to handle signals properly
  */
 export async function execPnpmDetached(
   args: string[],
@@ -277,7 +277,7 @@ export async function execPnpmDetached(
     // Spawn process that continues in the same terminal
     const child = spawn(command, commandArgs, {
       cwd: options.cwd,
-      detached: false,  // Don't detach - stay in same terminal
+      detached: process.platform !== 'win32',  // Detach on Unix for proper process group handling
       stdio: 'inherit', // Inherit stdio to stay in same terminal
       shell: true
     });
@@ -287,16 +287,82 @@ export async function execPnpmDetached(
       reject(new Error(`Failed to start process: ${error.message}`));
     });
 
+    // Set up signal handling to properly forward signals to child process
+    let isShuttingDown = false;
+    
+    const gracefulShutdown = () => {
+      if (child && !child.killed && !isShuttingDown) {
+        isShuttingDown = true;
+        logger.debug('Gracefully shutting down development server...');
+        
+        // First try graceful shutdown by forwarding the signal
+        if (process.platform === 'win32') {
+          child.kill('SIGTERM');
+        } else {
+          // Forward SIGTERM to the process group to allow cleanup
+          try {
+            if (child.pid) {
+              process.kill(-child.pid, 'SIGTERM');
+            } else {
+              child.kill('SIGTERM');
+            }
+          } catch (error) {
+            child.kill('SIGTERM');
+          }
+        }
+        
+        // If graceful shutdown doesn't work within 5 seconds, force kill
+        setTimeout(() => {
+          if (child && !child.killed) {
+            logger.debug('Force killing development server...');
+            if (process.platform === 'win32') {
+              child.kill('SIGKILL');
+            } else {
+              try {
+                if (child.pid) {
+                  process.kill(-child.pid, 'SIGKILL');
+                } else {
+                  child.kill('SIGKILL');
+                }
+              } catch (error) {
+                child.kill('SIGKILL');
+              }
+            }
+            process.exit(1);
+          }
+        }, 5000);
+      }
+    };
+
+    // Handle signals - keep CLI alive to properly forward them
+    const signals = process.platform === 'win32' 
+      ? ['SIGINT', 'SIGTERM', 'SIGBREAK']
+      : ['SIGINT', 'SIGTERM'];
+    
+    signals.forEach(signal => {
+      process.on(signal, gracefulShutdown);
+    });
+
+    // Handle child process exit
+    child.on('exit', (code, signal) => {
+      if (isShuttingDown) {
+        // This is expected during shutdown
+        logger.debug(`Development server stopped gracefully`);
+        process.exit(0);
+      } else if (code !== 0 && signal !== 'SIGKILL' && signal !== 'SIGTERM') {
+        reject(new Error(`Process exited with code ${code}`));
+      } else {
+        logger.debug(`Development server stopped`);
+        process.exit(code || 0);
+      }
+    });
+
     // Give the process a moment to start up, then resolve
     setTimeout(() => {
       if (!child.killed) {
         logger.debug(`Process started successfully with PID: ${child.pid}`);
         resolve();
-        
-        // Exit the CLI process after a short delay to let the dev server fully start
-        setTimeout(() => {
-          process.exit(0);
-        }, 2000);
+        // Don't exit the CLI - keep it alive to handle signals
       } else {
         reject(new Error('Process failed to start'));
       }
