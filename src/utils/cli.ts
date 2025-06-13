@@ -162,7 +162,7 @@ export async function execSupabase(
 }
 
 /**
- * Executes pnpm command with fallback to npx
+ * Executes pnpm command, installing pnpm if necessary
  */
 export async function execPnpm(
   args: string[],
@@ -174,44 +174,72 @@ export async function execPnpm(
     ...options
   };
 
-  // First try global installation
+  // First try global pnpm installation
   try {
     await which('pnpm');
     logger.debug(`Using global pnpm`);
     return await execa('pnpm', args, defaultOptions);
   } catch (globalError) {
-    logger.debug(`Global pnpm not found, trying local installation via npx`);
+    logger.debug(`Global pnpm not found, checking for local installation`);
     
-    // Try local installation via npx
+    // Try local pnpm via npx before attempting to install
     try {
+      logger.debug(`Trying local pnpm via npx`);
       return await execa('npx', ['pnpm', ...args], defaultOptions);
     } catch (localError) {
-      logger.debug(`Local pnpm via npx also failed`);
-      
-      // Enhanced error handling to capture stderr
-      let errorMessage = `Failed to execute pnpm`;
-      if (localError instanceof Error) {
-        errorMessage += `: ${localError.message}`;
-        
-        // If it's an execa error, it might have stdout/stderr
-        if ('stderr' in localError && localError.stderr) {
-          errorMessage += `\nStderr: ${localError.stderr}`;
-        }
-        if ('stdout' in localError && localError.stdout) {
-          errorMessage += `\nStdout: ${localError.stdout}`;
-        }
+      logger.debug(`Local pnpm also not found, attempting to install pnpm`);
+    
+    // Import the installation utilities
+    const { installCliTool } = await import('./prerequisites/installCLIs.js');
+    const { corePrerequisites } = await import('./prerequisites/prereqList.js');
+    
+    // Find pnpm prerequisite
+    const pnpmPrereq = corePrerequisites.find(p => p.command === 'pnpm');
+    if (!pnpmPrereq) {
+      throw new Error('pnpm prerequisite configuration not found');
+    }
+    
+    // Try to install pnpm globally first, then locally if that fails
+    let pnpmInstalled = false;
+    
+    try {
+      pnpmInstalled = await installCliTool(pnpmPrereq, true); // Try global install
+    } catch (error) {
+      logger.debug(`Global pnpm installation failed: ${error}`);
+    }
+    
+    if (!pnpmInstalled) {
+      try {
+        pnpmInstalled = await installCliTool(pnpmPrereq, false); // Try local install
+      } catch (error) {
+        logger.debug(`Local pnpm installation failed: ${error}`);
       }
-      
-      const enhancedError = new Error(errorMessage);
-      // Preserve original error properties
-      if (localError instanceof Error && 'stderr' in localError) {
-        (enhancedError as any).stderr = localError.stderr;
+    }
+    
+    if (!pnpmInstalled) {
+      throw new Error(
+        `Failed to install pnpm. Please install it manually with: npm install -g pnpm\n` +
+        `Or visit: https://pnpm.io/installation`
+      );
+    }
+    
+    // Try to use pnpm again after installation
+    try {
+      await which('pnpm');
+      logger.debug(`Using newly installed global pnpm`);
+      return await execa('pnpm', args, defaultOptions);
+    } catch (stillMissingError) {
+      // If global install didn't work, try npx with locally installed pnpm
+      logger.debug(`Global pnpm still not found, using npx for locally installed pnpm`);
+      try {
+        return await execa('npx', ['pnpm', ...args], defaultOptions);
+      } catch (npxError) {
+        throw new Error(
+          `pnpm was installed but couldn't be executed. Please restart your terminal and try again.\n` +
+          `Or install pnpm globally with: npm install -g pnpm`
+        );
       }
-      if (localError instanceof Error && 'stdout' in localError) {
-        (enhancedError as any).stdout = localError.stdout;
-      }
-      
-      throw enhancedError;
+    }
     }
   }
 }
@@ -226,7 +254,7 @@ export async function execPnpmDetached(
 ): Promise<void> {
   const { spawn } = await import('child_process');
   
-  // Determine which pnpm command to use
+  // Determine which command to use
   let command = 'pnpm';
   let commandArgs = args;
   
@@ -234,7 +262,13 @@ export async function execPnpmDetached(
     await which('pnpm');
     logger.debug(`Using global pnpm for detached execution`);
   } catch {
-    logger.debug(`Global pnpm not found, using npx for detached execution`);
+    logger.debug(`Global pnpm not found for detached execution`);
+    
+    // For detached execution, we'll use npx as fallback since we can't easily 
+    // install pnpm mid-stream in a detached context
+    logger.warning('pnpm not found, using npx fallback (may be slower)');
+    logger.info('Consider installing pnpm globally: npm install -g pnpm');
+    
     command = 'npx';
     commandArgs = ['pnpm', ...args];
   }

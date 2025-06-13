@@ -12,7 +12,7 @@ const program = new Command();
 
 // Default template URL
 const DEFAULT_TEMPLATE = 'https://github.com/VoloBuilds/volo-app.git';
-const VOLO_APP_BRANCH = 'release/v0.2.2';
+const VOLO_APP_BRANCH = 'release/v0.2.3';
 
 export async function main() {
   program
@@ -87,11 +87,15 @@ Examples:
         console.log(chalk.cyan.bold('🚀 Welcome to create-volo-app!'));
         console.log('');
 
-        // Check prerequisites unless skipped (only for production mode when using external services)
-        if (!options.skipPrereqs && (options.auth || options.database || options.deploy || options.full)) {
+        // Check prerequisites unless skipped
+        // Always check core tools (pnpm, git, node), and additional tools only for production services
+        if (!options.skipPrereqs) {
           await checkPrerequisites({
             autoInstall: options.installDeps,
-            fastMode: options.fast
+            fastMode: options.fast,
+            // For local mode, only check core prerequisites (pnpm, git, node)
+            // For production mode, check all relevant service CLIs too
+            productionMode: !!(options.auth || options.database || options.deploy || options.full)
           });
         }
 

@@ -17,6 +17,7 @@ export interface PrerequisiteOptions {
   autoInstall?: boolean;
   databasePreference?: string;
   fastMode?: boolean;
+  productionMode?: boolean;
 }
 
 export interface PrerequisiteResult {
