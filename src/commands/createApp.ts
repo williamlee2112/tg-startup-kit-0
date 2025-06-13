@@ -154,27 +154,34 @@ export async function createApp(
     spinner: 'line'
   }).start();
   
+  let postSetupSucceeded = false;
   try {
     await execPnpm(['post-setup'], { 
       cwd: directory, 
       stdio: options.verbose ? 'inherit' : 'pipe' 
     });
     postSetupSpinner.succeed('Post-setup completed successfully!');
+    postSetupSucceeded = true;
   } catch (error) {
-    postSetupSpinner.fail('Post-setup encountered issues');
-    logger.warning('You can run it manually later with: pnpm post-setup');
+    postSetupSpinner.fail('Post-setup failed');
+    logger.error('Failed to complete project setup');
     logger.debug(`Post-setup error: ${error}`);
   }
 
-  // Step 7: Success message
+  // Step 7: Success/Status message
   logger.newLine();
   
-  if (isFullLocal) {
-    logger.success('🎉 Your local volo-app has been created successfully!');
-  } else if (isFullProduction) {
-    logger.success('🎉 Your production-ready volo-app has been created successfully!');
+  if (postSetupSucceeded) {
+    if (isFullLocal) {
+      logger.success('🎉 Your local volo-app has been created successfully!');
+    } else if (isFullProduction) {
+      logger.success('🎉 Your production-ready volo-app has been created successfully!');
+    } else {
+      logger.success('🎉 Your modular volo-app has been created successfully!');
+    }
   } else {
-    logger.success('🎉 Your modular volo-app has been created successfully!');
+    logger.warning('⚠️  Your volo-app was created but setup is incomplete');
+    logger.info('The project files are ready, but post-setup configuration failed.');
   }
   
   logger.newLine();
@@ -203,11 +210,20 @@ export async function createApp(
   
   logger.newLine();
   
-  console.log(chalk.green.bold('▶️  Next steps:'));
-  if (!isCurrentDirectory) {
-    console.log(chalk.cyan(`   cd ${name}`));
+  if (postSetupSucceeded) {
+    console.log(chalk.green.bold('▶️  Next steps:'));
+    if (!isCurrentDirectory) {
+      console.log(chalk.cyan(`   cd ${name}`));
+    }
+    console.log(chalk.cyan('   pnpm run dev'));
+  } else {
+    console.log(chalk.yellow.bold('🔧 Fix setup issues first:'));
+    if (!isCurrentDirectory) {
+      console.log(chalk.cyan(`   cd ${name}`));
+    }
+    console.log(chalk.cyan('   pnpm post-setup'));
+    console.log(chalk.gray('   Then run: pnpm run dev'));
   }
-  console.log(chalk.cyan('   pnpm run dev'));
   
   // Show connection upgrade options only for non-full-production setups
   if (!isFullProduction) {
@@ -227,10 +243,11 @@ export async function createApp(
   
   logger.newLine();
   
-  // Ask if user wants to start the app now
-  const startNow = await askToStartDevelopmentServer();
+  // Ask if user wants to start the app now (only if setup succeeded)
+  if (postSetupSucceeded) {
+    const startNow = await askToStartDevelopmentServer();
 
-  if (startNow) {
+    if (startNow) {
     logger.newLine();
     console.log(chalk.green('🚀 Starting your volo-app...'));
     logger.newLine();
@@ -267,6 +284,17 @@ export async function createApp(
       console.log(chalk.cyan(`   cd ${name}`));
       console.log(chalk.cyan('   pnpm run dev'));
     }
+    }
+  } else {
+    // Post-setup failed, show troubleshooting guidance
+    logger.newLine();
+    console.log(chalk.yellow.bold('🛠️  Troubleshooting:'));
+    console.log(chalk.white('Complete the setup first, then you can start your app:'));
+    if (!isCurrentDirectory) {
+      console.log(chalk.cyan(`   cd ${name}`));
+    }
+    console.log(chalk.cyan('   pnpm post-setup'));
+    console.log(chalk.cyan('   pnpm run dev'));
   }
 }
 

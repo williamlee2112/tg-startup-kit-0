@@ -118,31 +118,40 @@ export async function checkPrerequisites(options: PrerequisiteOptions = {}): Pro
     }
   }
 
-  // Check database preference for CLI validation
-  let databaseChoice: string | null;
+  // Build prerequisites list based on mode
+  let prerequisites = [...corePrerequisites];
+  let databaseChoice: string | null = null;
   
-  if (options.databasePreference) {
-    // Use provided database preference
-    databaseChoice = options.databasePreference;
-    logger.info(`Using database provider: ${databaseChoice}`);
-  } else if (options.fastMode) {
-    // Default to Neon in fast mode
-    databaseChoice = 'neon';
-    logger.info('Fast mode: Using Neon as database provider');
+  if (options.productionMode) {
+    // Production mode: check all prerequisites including database CLIs
+    // Check database preference for CLI validation
+    
+    if (options.databasePreference) {
+      // Use provided database preference
+      databaseChoice = options.databasePreference;
+      logger.info(`Using database provider: ${databaseChoice}`);
+    } else if (options.fastMode) {
+      // Default to Neon in fast mode
+      databaseChoice = 'neon';
+      logger.info('Fast mode: Using Neon as database provider');
+    } else {
+      // Ask user for preference
+      databaseChoice = await checkDatabaseChoice();
+    }
+    
+    if (databaseChoice && databasePrerequisites[databaseChoice]) {
+      prerequisites.push(databasePrerequisites[databaseChoice]);
+      logger.info(`Database choice "${databaseChoice}" requires: ${databasePrerequisites[databaseChoice].name}`);
+    } else if (databaseChoice) {
+      logger.info(`Database choice "${databaseChoice}" - no additional CLI tools required`);
+    } else {
+      logger.info('No database provider selected - skipping database CLI checks');
+    }
   } else {
-    // Ask user for preference
-    databaseChoice = await checkDatabaseChoice();
-  }
-  
-  // Build prerequisites list
-  const prerequisites = [...corePrerequisites];
-  if (databaseChoice && databasePrerequisites[databaseChoice]) {
-    prerequisites.push(databasePrerequisites[databaseChoice]);
-    logger.info(`Database choice "${databaseChoice}" requires: ${databasePrerequisites[databaseChoice].name}`);
-  } else if (databaseChoice) {
-    logger.info(`Database choice "${databaseChoice}" - no additional CLI tools required`);
-  } else {
-    logger.info('No database provider selected - skipping database CLI checks');
+    // Local mode: only check core prerequisites (Node.js, pnpm, Git)
+    // Skip database CLI checks since local mode uses embedded PostgreSQL
+    prerequisites = prerequisites.filter(prereq => ['node', 'pnpm', 'git'].includes(prereq.command));
+    logger.info('Local development mode: checking core tools only (Node.js, pnpm, Git)');
   }
 
   let recheckNeeded = true;
