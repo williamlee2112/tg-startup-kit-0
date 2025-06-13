@@ -284,8 +284,8 @@ export async function createApp(
       }
       
       logger.newLine();
-      console.log(chalk.yellow('💡 The development server is running in the background.'));
-      console.log(chalk.gray('   Press Ctrl+C in the project directory to stop it.'));
+      console.log(chalk.yellow('💡 The development server is running.'));
+      console.log(chalk.gray('   Press Ctrl+C to stop it.'));
       
     } catch (error) {
       logger.error('Failed to start the development server');
