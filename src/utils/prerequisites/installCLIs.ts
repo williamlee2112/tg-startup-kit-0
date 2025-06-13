@@ -26,9 +26,15 @@ export async function installCliTool(prereq: Prerequisite, global: boolean = fal
     return true;
   } catch (error) {
     // If global install fails due to permissions, suggest local install
-    if (global && error instanceof Error && error.message.includes('EACCES')) {
+    if (global && error instanceof Error && (error.message.includes('EACCES') || error.message.includes('permission denied'))) {
       spinner.fail(`${prereq.name} global install failed (permission denied)`);
       logger.debug(`Global installation permission error: ${error}`);
+      
+             // Show helpful message for Mac users
+       if (process.platform === 'darwin') {
+         logger.info(`💡 On Mac, you can fix this by running: sudo npm install -g ${prereq.npmPackage}`);
+         logger.info(`   But we'll proceed with local install (works just as well)`);
+       }
       
       // Try local installation as fallback
       if (prereq.canInstallLocally) {
