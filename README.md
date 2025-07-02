@@ -15,12 +15,15 @@ Start with everything running locally on your machine, then progressively connec
 
 **Frontend:**
 - ⚛️ React + TypeScript + Vite
+- ⚛️ AG Grid + Cytoscape + React Flow
 - 🎨 Tailwind CSS + ShadCN components
 - 🔐 Firebase Authentication (Google Sign-In)
 
 **Backend:**
 - 🔥 Hono API backend (NodeJS)
+- 🗄️ React Server Components
 - 🗄️ PostgreSQL with Drizzle ORM
+- 🗄️ PostgreSQL + AGE Graph + TimescaleDB + GIS + Hstore
 - 🔑 Firebase Admin SDK
 
 **Local Development (Default):**
