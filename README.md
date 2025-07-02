@@ -1,6 +1,6 @@
-# Your Volo App
+# Your ThinkGraph App
 
-Welcome to your new full-stack application! This project was created with `create-volo-app` and comes pre-configured with a modern tech stack and production-ready architecture.
+Welcome to your new full-stack application! This project was created with `create-thinkgraph-app` and comes pre-configured with a modern tech stack and production-ready architecture.
 
 ## 🎯 **Philosophy**
 
